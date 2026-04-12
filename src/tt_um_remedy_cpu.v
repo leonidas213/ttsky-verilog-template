@@ -1250,11 +1250,11 @@ module RegisterBlock (
 endmodule
 
 
-module Mux_16x1_NBits #(
+module Mux_8x1_NBits #(
     parameter Bits = 2
 )
 (
-    input [3:0] sel,
+    input [2:0] sel,
     input [(Bits - 1):0] in_0,
     input [(Bits - 1):0] in_1,
     input [(Bits - 1):0] in_2,
@@ -1263,34 +1263,18 @@ module Mux_16x1_NBits #(
     input [(Bits - 1):0] in_5,
     input [(Bits - 1):0] in_6,
     input [(Bits - 1):0] in_7,
-    input [(Bits - 1):0] in_8,
-    input [(Bits - 1):0] in_9,
-    input [(Bits - 1):0] in_10,
-    input [(Bits - 1):0] in_11,
-    input [(Bits - 1):0] in_12,
-    input [(Bits - 1):0] in_13,
-    input [(Bits - 1):0] in_14,
-    input [(Bits - 1):0] in_15,
     output reg [(Bits - 1):0] out
 );
     always @ (*) begin
         case (sel)
-            4'h0: out = in_0;
-            4'h1: out = in_1;
-            4'h2: out = in_2;
-            4'h3: out = in_3;
-            4'h4: out = in_4;
-            4'h5: out = in_5;
-            4'h6: out = in_6;
-            4'h7: out = in_7;
-            4'h8: out = in_8;
-            4'h9: out = in_9;
-            4'ha: out = in_10;
-            4'hb: out = in_11;
-            4'hc: out = in_12;
-            4'hd: out = in_13;
-            4'he: out = in_14;
-            4'hf: out = in_15;
+            3'h0: out = in_0;
+            3'h1: out = in_1;
+            3'h2: out = in_2;
+            3'h3: out = in_3;
+            3'h4: out = in_4;
+            3'h5: out = in_5;
+            3'h6: out = in_6;
+            3'h7: out = in_7;
             default:
                 out = 'h0;
         endcase
@@ -1879,38 +1863,6 @@ always @(*) begin
 end
 
 endmodule
-
-module Mux_8x1_NBits #(
-    parameter Bits = 2
-)
-(
-    input [2:0] sel,
-    input [(Bits - 1):0] in_0,
-    input [(Bits - 1):0] in_1,
-    input [(Bits - 1):0] in_2,
-    input [(Bits - 1):0] in_3,
-    input [(Bits - 1):0] in_4,
-    input [(Bits - 1):0] in_5,
-    input [(Bits - 1):0] in_6,
-    input [(Bits - 1):0] in_7,
-    output reg [(Bits - 1):0] out
-);
-    always @ (*) begin
-        case (sel)
-            3'h0: out = in_0;
-            3'h1: out = in_1;
-            3'h2: out = in_2;
-            3'h3: out = in_3;
-            3'h4: out = in_4;
-            3'h5: out = in_5;
-            3'h6: out = in_6;
-            3'h7: out = in_7;
-            default:
-                out = 'h0;
-        endcase
-    end
-endmodule
-
 module muxEncoder
   (
     input a,
@@ -1975,6 +1927,54 @@ module DIG_Sub #(
     assign temp = a - b - c_i;
     assign s = temp[(Bits-1):0];
     assign c_o = temp[Bits];
+endmodule
+
+
+module Mux_16x1_NBits #(
+    parameter Bits = 2
+)
+(
+    input [3:0] sel,
+    input [(Bits - 1):0] in_0,
+    input [(Bits - 1):0] in_1,
+    input [(Bits - 1):0] in_2,
+    input [(Bits - 1):0] in_3,
+    input [(Bits - 1):0] in_4,
+    input [(Bits - 1):0] in_5,
+    input [(Bits - 1):0] in_6,
+    input [(Bits - 1):0] in_7,
+    input [(Bits - 1):0] in_8,
+    input [(Bits - 1):0] in_9,
+    input [(Bits - 1):0] in_10,
+    input [(Bits - 1):0] in_11,
+    input [(Bits - 1):0] in_12,
+    input [(Bits - 1):0] in_13,
+    input [(Bits - 1):0] in_14,
+    input [(Bits - 1):0] in_15,
+    output reg [(Bits - 1):0] out
+);
+    always @ (*) begin
+        case (sel)
+            4'h0: out = in_0;
+            4'h1: out = in_1;
+            4'h2: out = in_2;
+            4'h3: out = in_3;
+            4'h4: out = in_4;
+            4'h5: out = in_5;
+            4'h6: out = in_6;
+            4'h7: out = in_7;
+            4'h8: out = in_8;
+            4'h9: out = in_9;
+            4'ha: out = in_10;
+            4'hb: out = in_11;
+            4'hc: out = in_12;
+            4'hd: out = in_13;
+            4'he: out = in_14;
+            4'hf: out = in_15;
+            default:
+                out = 'h0;
+        endcase
+    end
 endmodule
 
 
@@ -2345,10 +2345,19 @@ module tt_um_remedy_cpu (
   wire [15:0] timerdat1;
   wire [8:0] s69;
   wire [15:0] timerdat2;
-  wire [3:0] s70;
+  wire [2:0] s70;
   wire [15:0] i2cDat;
-  wire [3:0] s71;
+  wire [4:0] s71;
   wire s72;
+  wire [3:0] s73;
+  wire s74;
+  wire s75;
+  wire s76;
+  wire s77;
+  wire s78;
+  wire s79;
+  wire s80;
+  wire s81;
   assign inputReg[0] = ui_in[0];
   assign inputReg[1] = ui_in[1];
   assign inputReg[2] = ui_in[2];
@@ -2574,35 +2583,27 @@ module tt_um_remedy_cpu (
     .RDest( s0 ),
     .Rsrc( s1 )
   );
-  Mux_16x1_NBits #(
+  Mux_8x1_NBits #(
     .Bits(16)
   )
-  Mux_16x1_NBits_i18 (
+  Mux_8x1_NBits_i18 (
     .sel( s70 ),
     .in_0( inputReg ),
     .in_1( outR ),
     .in_2( timerdat1 ),
-    .in_3( timerdat1 ),
-    .in_4( timerdat1 ),
-    .in_5( i2cDat ),
-    .in_6( timerdat2 ),
-    .in_7( timerdat2 ),
-    .in_8( timerdat2 ),
-    .in_9( 16'b0 ),
-    .in_10( 16'b0 ),
-    .in_11( rngdat0 ),
-    .in_12( rngdat0 ),
-    .in_13( intr_reg ),
-    .in_14( intr_reg ),
-    .in_15( intr_reg ),
+    .in_3( timerdat2 ),
+    .in_4( rngdat0 ),
+    .in_5( intr_reg ),
+    .in_6( i2cDat ),
+    .in_7( i2cDat ),
     .out( iow_Din )
   );
   // i2c_master_ctrl
   i2c_master_ctrl i2c_master_ctrl_i19 (
     .clk( s20 ),
     .rst_n( rst_n ),
-    .wr_en( s40 ),
-    .reg_addr( s71 ),
+    .wr_en( s72 ),
+    .reg_addr( s73 ),
     .cpu_din( s1 ),
     .sda_in( \sda-in  ),
     .scl_in( \scl-in  ),
@@ -2637,7 +2638,7 @@ module tt_um_remedy_cpu (
     .in_1( spi_cs ),
     .out( spics_ram )
   );
-  assign s72 = ~ spi_target;
+  assign s74 = ~ spi_target;
   assign s8 = s7[3:0];
   assign s9 = s7[7:4];
   assign OPcode = s7[15:8];
@@ -2657,7 +2658,7 @@ module tt_um_remedy_cpu (
   assign s65[2] = s67;
   assign s65[3] = i2c_inter;
   Mux_2x1 Mux_2x1_i23 (
-    .sel( s72 ),
+    .sel( s74 ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
     .out( spics_flash )
@@ -2802,8 +2803,19 @@ module tt_um_remedy_cpu (
     .\= ( s39 )
   );
   assign s47 = ((s18 ^ br[2]) & \execute-pulse );
-  assign s70 = s11[3:0];
-  assign s71 = s11[3:0];
+  assign s72 = (s11[4] & s40);
+  assign s71 = s11[4:0];
+  assign s73 = s11[3:0];
   assign s41 = (s39 & s40);
+  assign s75 = s71[0];
+  assign s76 = s71[1];
+  assign s77 = s71[2];
+  assign s78 = s71[3];
+  assign s79 = s71[4];
+  assign s80 = ~ s77;
+  assign s81 = ~ s76;
+  assign s70[0] = ((~ s79 & s80 & s81 & s75) | (s78 & s81 & s75) | (s78 & s80 & s81) | (s77 & s76));
+  assign s70[1] = (s79 | (~ s78 & s76) | (~ s78 & s77) | (s78 & s80 & s81));
+  assign s70[2] = (s79 | (s78 & s76 & s75) | (s78 & s77));
   assign uo_out = uo_out_temp;
 endmodule
