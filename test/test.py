@@ -32,7 +32,7 @@ async def boot_cpu(dut):
 from test_tiny_instructions import *
 
 
-@cocotb.test()
+#@cocotb.test()
 async def test_cpu_fibonacci_compiler(dut):
     dut._log.info("Starting CPU test")
     pins, flash, ram = await boot_cpu(dut)

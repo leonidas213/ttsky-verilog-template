@@ -819,7 +819,6 @@ module interrupt_controller_small (
     input  [3:0] dOut,
     input  [15:0] Addr,
     input         ioW,
-    input         ioR,
     input         C,
     input         rst_n,
 
@@ -858,9 +857,9 @@ module interrupt_controller_small (
   assign wr_enable  = ioW && (Addr == inputInterruptAddr);
   assign wr_pending = ioW && (Addr == interruptRegAddr);
 
-  assign rd_ctrl    = ioR && (Addr == CPUInterruptEnableAddr);
-  assign rd_enable  = ioR && (Addr == inputInterruptAddr);
-  assign rd_pending = ioR && (Addr == interruptRegAddr);
+  assign rd_ctrl    =  (Addr == CPUInterruptEnableAddr);
+  assign rd_enable  =  (Addr == inputInterruptAddr);
+  assign rd_pending =  (Addr == interruptRegAddr);
 
   assign pending_with_new_irq = irq_pending | irq_in;
   assign active_irq           = irq_pending & irq_enable;
@@ -917,7 +916,6 @@ module lfsr_RandomNumberGen (
     input  [7:0] dataIn,
     input         ioW,
     input         clk,
-    input         ioR,
     input  [15:0] SeedAdr,
     input  [15:0] RngAdr,
     output [15:0] Out
@@ -927,8 +925,8 @@ module lfsr_RandomNumberGen (
     reg [7:0] lfsr    ;
 
     wire seed_wr  = ioW && (adrrIn == SeedAdr);
-    wire seed_rd  = ioR && (adrrIn == SeedAdr);
-    wire rng_rd   = ioR && (adrrIn == RngAdr);
+    wire seed_rd  =  (adrrIn == SeedAdr);
+    wire rng_rd   =  (adrrIn == RngAdr);
 
     // 8-bit maximal-length taps
     // polynomial: x^8 + x^6 + x^5 + x^4 + 1
@@ -952,7 +950,6 @@ module timer (
     input  [15:0] dOut,
     input  [15:0] Addr,
     input         ioW,
-    input         ioR,
     input         C,
     input         InterLock,
     input  [15:0] timerConfigAddr,
@@ -975,9 +972,9 @@ module timer (
   wire wr_reset  = ioW && (Addr == timerResetAddr) && dOut[0];
   wire wr_sync_start = ioW && (Addr == timerSyncStartAddr);
 
-  wire rd_count  = ioR && (Addr == timerReadAddr);
-  wire rd_target = ioR && (Addr == timerTargetAddr);
-  wire rd_conf   = ioR && (Addr == timerConfigAddr);
+  wire rd_count  =  (Addr == timerReadAddr);
+  wire rd_target =  (Addr == timerTargetAddr);
+  wire rd_conf   =  (Addr == timerConfigAddr);
 
   wire       timer_en     = conf[0];
   wire [3:0] prescaler    = conf[4:1];
@@ -1053,7 +1050,7 @@ module timer (
       if (wr_reset)
       begin
         count        <= 16'h0000;
-        prescale_cnt <= 15'h0000;
+        conf         <=7'h00;
       end
       else
       begin
@@ -1089,7 +1086,6 @@ module timer_tiny (
     input  [8:0] dOut,
     input  [15:0] Addr,
     input         ioW,
-    input         ioR,
     input         C,
     input         InterLock,
     input  [15:0] timerConfigAddr,
@@ -1112,9 +1108,9 @@ module timer_tiny (
   wire wr_reset  = ioW && (Addr == timerResetAddr) && dOut[0];
   wire wr_sync_start = ioW && (Addr == timerSyncStartAddr);
 
-  wire rd_count  = ioR && (Addr == timerReadAddr);
-  wire rd_target = ioR && (Addr == timerTargetAddr);
-  wire rd_conf   = ioR && (Addr == timerConfigAddr);
+  wire rd_count  = (Addr == timerReadAddr);
+  wire rd_target = (Addr == timerTargetAddr);
+  wire rd_conf   = (Addr == timerConfigAddr);
 
   wire       timer_en     = conf[0];
   wire [3:0] prescaler    = conf[4:1];
@@ -1190,7 +1186,7 @@ module timer_tiny (
       if (wr_reset)
       begin
         count        <= 8'h00;
-        prescale_cnt <= 15'h0000;
+        conf        <=7'h00;
       end
       else
       begin
@@ -2514,7 +2510,6 @@ module tt_um_remedy_cpu (
     .dOut( s64 ),
     .Addr( s11 ),
     .ioW( s40 ),
-    .ioR( s51 ),
     .C( s20 ),
     .rst_n( rst_n ),
     .irq_in( s65 ),
@@ -2534,7 +2529,6 @@ module tt_um_remedy_cpu (
     .dataIn( s68 ),
     .ioW( s40 ),
     .clk( s20 ),
-    .ioR( s51 ),
     .SeedAdr( 16'b1011 ),
     .RngAdr( 16'b1100 ),
     .Out( rngdat0 )
@@ -2544,7 +2538,6 @@ module tt_um_remedy_cpu (
     .dOut( s1 ),
     .Addr( s11 ),
     .ioW( s40 ),
-    .ioR( s51 ),
     .C( s20 ),
     .InterLock( InterLock ),
     .timerConfigAddr( 16'b10 ),
@@ -2561,13 +2554,12 @@ module tt_um_remedy_cpu (
     .dOut( s69 ),
     .Addr( s11 ),
     .ioW( s40 ),
-    .ioR( s51 ),
     .C( s20 ),
     .InterLock( InterLock ),
-    .timerConfigAddr( 16'b1001 ),
-    .timerTargetAddr( 16'b1000 ),
-    .timerResetAddr( 16'b111 ),
-    .timerReadAddr( 16'b110 ),
+    .timerConfigAddr( 16'b110 ),
+    .timerTargetAddr( 16'b111 ),
+    .timerResetAddr( 16'b1000 ),
+    .timerReadAddr( 16'b1001 ),
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat2 ),
