@@ -11,6 +11,10 @@ You can also include images in this folder and reference them in the markdown. E
 
 Using this custom IDE to compile assembly or cpp-ish code and upload it to the spi flash.
 [repo link here hopefully If I don't forget]
+### Assembler
+![image](assembler.png)
+### Work in progress compiler
+![image](compil_test.png)
 
 ## External hardware
 
@@ -18,13 +22,16 @@ with PMOD or external spi flash/ram. Currently only use regular spi mode to comm
 
 ## How it works
 Read program from spi flash and executes its instructions. Depending on the program it cna also use 1 ram. It will only use address 0x00000-0x1ffff. So it will use really small amount for both spi flash and ram.
+**OH You can only read/write to ram with half-words and also read flash with half-words**
+so if the memory at 0x00 is something like **0x3df12548** you can read **0x3df1** or **0x2548** but you can't read **0xf125**
 
 # CPU SPECS
+![image](cpu_arch.png)
 ## Overview
 CPU SPECS
-External spi Flash up to 64k
-External spi Ram up to 64k
-
+External spi Flash up to 131kb
+External spi Ram up to 131kb
+(it can only use addresse between 0x00000-0x1FFFF)
 
 First you send read command to spi flash 
 Then send 16 bit program address from cpu
@@ -35,20 +42,15 @@ Rinse and repeat
 ## SPI Fetch Timing
     
 
-
-
-```text
-                   _    _   _    _   _    _   _    _   _   _   _    _   _    _   _    _   _    _   _    _   _    _   _    _   _   _   _    _   _    _   _    _   _    _   _    _   _    _   _    _   _   _    _   _   
-;  CLOCK         _/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \_/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \_/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \__/ \_/ \_/ \__/ \_/ \___| o o o
-;                ----------------------------------------------------------------------------------------------------------------- ----------------------------------------------------------------------------------- | o o o
-;  Bit numbers   |  8 |  7|  6 |  5|  4 |  3|  2 |  1| 0 | 15| 14 | 13| 12 | 11| 10 |  9|  8 |  7|  6 |  5|  4 |  3|  2 |  1| 0 | 15| 14 | 13| 12| 11 | 10 |  9|  8 |  7|  6|  5 |  4|  3 |  2|  1 |  0| 
-;  Datas         |          0x03 Read command(Write)     |                Program Counter(Program Address)(Write)              |                     Opcode(Operation code)(Read)                      | 3 clock cycles| o o o
-```
+-0x03 Read command(Write) [8 bits]
+-Program Counter(Program Address)(Write)  [24 bits]
+-Opcode(Operation code)(Read) [16 bits]
+-3 clock cycle
+          
 
 
 
-Yeah i know it is slow but it is what it is
-so if you have **43 mhz** clock this cpu will run at **1mhz** :D
+Yeah i know it is slow but it is what it is :D
 Anyway here is the full cpu specs
 ## Notes
 Total of **16** general purpouse registers that can hold 16 bit numbers
@@ -129,39 +131,53 @@ Total of **16** general purpouse registers that can hold 16 bit numbers
 
 
 ## REGISTERS
-#NEED TO UPDATE ADDRESSES
+
 ```text
 ;---------- REGISTERS   -------------
 ; this timer is 16-bit
-timer1Config = 3         ;5-bit    |    1 bit       |  1 bit  |    4 bit   | 1 bit  |  
-                         ;         |Interrupt enable| reload  |  prescaler | enable |
+timer1Config = 2         ;5-bit    |    1 bit       |  1 bit  |    4 bit   | 1 bit  |  
+                         ; not used|Interrupt enable| reload  |  prescaler | enable |
  
-timer1Target = 4         ; 16-bit target value for interrupt generation
-timer1Reset = 5          ; 1-bit reset timer
-timer1ReadAdr = 6        ; 16-bit
+timer1Target = 3         ; 16-bit target value for interrupt generation
+timer1Reset = 4          ; 1-bit reset timer
+timer1ReadAdr = 5        ; 16-bit
 
 ; this timer is 8-bit
-timer2Config = 7         ; Similar configuration as timer1
-timer2Target = 8         ; 8-bit target value for timer2
-timer2Reset = 9          ; 1-bit reset timer2
-timer2ReadAdr = 10       ; 8-bit
+timer2Config = 6         ; Similar configuration as timer1
+timer2Target = 7         ; 8-bit target value for timer2
+timer2Reset = 8          ; 1-bit reset timer2
+timer2ReadAdr = 9       ; 8-bit
 
-timerSyncStart = 11       ;1-bit, when set to 1, it starts all timers at the same time.
+timerSyncStart = 10       ;1-bit, when set to 1, it starts all timers at the same time.
 ; random number generator
 ; RNG is always active at every clock cycle
-RandomSeedAddr = 12        ;16-bit seed location
-RandomReg = 13              ;Generated value
+RandomSeedAddr = 11        ;16-bit seed location
+RandomReg = 12              ;Generated value
 
 ; GPIO Registers
 OutputReg = 1          ; 8-bit data for GPIO pins
-; OutputEnable = 16       ; 8-bit configuration for GPIO pins (input/output)
-InputReg = 2           ;8-bit data from GPIO pins 
+InputReg = 0           ;8-bit data from GPIO pins 
 
 ; Interrupt registers
-CpuinterruptEnable = 14       ; 1-bit
-InputInterruptEnable = 15   ;1-bit if 1, input pins interrupt is enabled
-InterruptRegister = 16      ;16-bit
+CpuinterruptEnable = 13       ; 1-bit
+InputInterruptEnable = 14   ;1-bit if 1, input pins interrupt is enabled
+InterruptRegister = 15      ;16-bit
 
+I2cCtrl = 16                   ; |    1 bit      |  1 bit     |  1 bit  |
+                               ;   strech enable | irq enable | enable  |
+I2cStatus = 17
+; |    1 bit    |    1 bit      |  1 bit     |  1 bit  |         1 bit         |        1 bit       |
+;  irq pending  | rx valid      | ack error  | done    | bus active(read only) | op busy (read only)
+I2cPrescaler = 18               ; 16-bit prescaler
+I2cDataReg = 19                 ; 8-bit, if you write to it it will be writen to the bus,
+                                ; if you read from it, it will give you the last read value from the bus.
+I2cCommand = 20                 ; when you want to write to the bus you can exxecute different commands
+; for example if you read multiple values with "cmd read" and
+; you want to finish it reading with "nack" you need to use "cmd read nack"
+; so the device that you are controlling will understand that you don't want to read anymore
+; ex:mpu6050
+; |    1 bit       |  1 bit   |  1 bit    |  1 bit    |  1 bit     |
+; |  cmd read nack | cmd read | cmd write |  cmd stop | cmd start  |
 
 
 
@@ -177,7 +193,7 @@ InterruptRegister = 16      ;16-bit
 ; ldi r1, 0x12            ; Load 0x12 into r1
 ; ldi r2, 0x20            ; Load 0x20 into r2
 ; add r1, r2              ; Add r1 and r2, store result in r1
-; sts r1, 0x1000          ; Store result from r1 into memory address 0x1000
+; st r1, 0x1000          ; Store result from r1 into memory address 0x1000
 ; putoutput r1            ; Output result from r1 [only lower 8 bits]
 
 ; Example 2: Timer configuration
