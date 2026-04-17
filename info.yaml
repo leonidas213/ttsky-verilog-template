@@ -1,6 +1,6 @@
 # Tiny Tapeout project information
 project:
-  title:        "Remedy cpu 16-bit"      # Project title
+  title:        "FFD16 cpu 16-bit"      # Project title
   author:       "Bahri Berkant İçöz"      # Your name
   discord:      "aerkany"      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "16-bit spi cpu"      # One line description of what your project does
