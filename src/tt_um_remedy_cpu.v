@@ -285,9 +285,6 @@ module Mux_2x1_NBits #(
 endmodule
 
 module memory_wait_controller
-#(
-    parameter [15:0] FLASH_SEQ_STEP = 16'd1
-)
 (
     input  wire        clk,
     input  wire        rst_n,
@@ -296,6 +293,8 @@ module memory_wait_controller
     input  wire        fetch_req,
     input  wire        ld_req,
     input  wire        st_req,
+    input  wire        flash_req,
+
     input  wire [15:0] fetch_addr,
     input  wire [15:0] data_addr,
     input  wire [15:0] store_data,
@@ -330,6 +329,7 @@ module memory_wait_controller
   localparam S_WAIT_BUSY_HIGH = 3'd2;
   localparam S_WAIT_BUSY_LOW  = 3'd3;
   localparam S_FINISH         = 3'd4;
+  localparam FLASH_SEQ_STEP = 16'd1;
 
   reg [2:0] state;
   reg [1:0] op;
@@ -409,6 +409,16 @@ module memory_wait_controller
             spi_addr      <= fetch_addr;
             spi_data_in   <= 16'h0000;
             use_flash_seq <= flash_seq_hit;
+            mem_stall     <= 1'b1;
+            state         <= S_START;
+          end
+          else if(flash_req)
+            begin
+            op            <= OP_LOAD;
+            spi_target    <= 1'b0;      // FLASH
+            spi_addr      <= data_addr;
+            spi_data_in   <= 16'h0000;
+            use_flash_seq <= 1'b0;
             mem_stall     <= 1'b1;
             state         <= S_START;
           end
@@ -748,6 +758,8 @@ module cpu_cycle_controller
 
     input  wire ld,
     input  wire st,
+    input  wire flash_ld,
+
 
     output wire fetch_req,
     output wire execute_now_pulse
@@ -784,7 +796,7 @@ module cpu_cycle_controller
 
         S_EXECUTE:
         begin
-          if (ld || st)
+          if (ld || st || flash_ld)
             state <= S_WAIT_DATA;
           else
             state <= S_REQ_FETCH;
@@ -1750,10 +1762,11 @@ module opcode_microcode_rom(
     output ioW,
     output ioR,
     output stPC,
-    output Reti
+    output Reti,
+    output flash_req
 );
 
-reg [23:0] ctrl;
+reg [24:0] ctrl;
 
 assign {
     muxb0,
@@ -1779,82 +1792,87 @@ assign {
     ioW,
     ioR,
     stPC,
-    Reti
+    Reti,
+    flash_req
 } = ctrl;
 
 always @(*) begin
     case (opcode)
-        7'b0000000: ctrl = 24'b0000_0000_0000_0000_0000_0000;//8'hx00:
-        7'b0000001: ctrl = 24'b0000_0000_0100_0000_1000_0000;//8'hx01:
-        7'b0000010: ctrl = 24'b0000_0000_1110_0000_0000_0000;//8'hx02:
-        7'b0000011: ctrl = 24'b0001_0000_1110_0000_0000_0000;//8'hx03:
-        7'b0000100: ctrl = 24'b0000_0001_0110_0000_0000_0000;//8'hx04:
-        7'b0000101: ctrl = 24'b0001_0001_0110_0000_0000_0000;//8'hx05:
-        7'b0000110: ctrl = 24'b0000_0001_1110_0000_0000_0000;//8'hx06:
-        7'b0000111: ctrl = 24'b0000_0010_0110_0000_0000_0000;//8'hx07:
-        7'b0001000: ctrl = 24'b0000_0010_1110_0000_0000_0000;//8'hx08:
-        7'b0001001: ctrl = 24'b0100_0000_0101_0000_0000_0000;//8'hx09:
-        7'b0001010: ctrl = 24'b1010_0000_0100_0000_0000_0000;//8'hx0A:
-        7'b0001011: ctrl = 24'b0100_0000_1111_0000_0000_0000;//8'hx0B:
-        7'b0001100: ctrl = 24'b1010_0000_1110_0000_0000_0000;//8'hx0C:
-        7'b0001101: ctrl = 24'b0101_0000_1111_0000_0000_0000;//8'hx0D:
-        7'b0001110: ctrl = 24'b1011_0000_1110_0000_0000_0000;//8'hx0E:
-        7'b0001111: ctrl = 24'b0100_0001_0111_0000_0000_0000;//8'hx0F:
-        7'b0010000: ctrl = 24'b1010_0001_0110_0000_0000_0000;//8'hx10:
-        7'b0010001: ctrl = 24'b0101_0001_0111_0000_0000_0000;//8'hx11:
-        7'b0010010: ctrl = 24'b1011_0001_0110_0000_0000_0000;//8'hx12:
-        7'b0010011: ctrl = 24'b0000_0011_1100_0000_0000_0000;//8'hx13:
-        7'b0010100: ctrl = 24'b0100_0001_1111_0000_0000_0000;//8'hx14:
-        7'b0010101: ctrl = 24'b1010_0001_1110_0000_0000_0000;//8'hx15:
-        7'b0010110: ctrl = 24'b0100_0010_0111_0000_0000_0000;//8'hx16:
-        7'b0010111: ctrl = 24'b1010_0010_0110_0000_0000_0000;//8'hx17:
-        7'b0011000: ctrl = 24'b0100_0010_1111_0000_0000_0000;//8'hx18:
-        7'b0011001: ctrl = 24'b1010_0010_1110_0000_0000_0000;//8'hx19:
-        7'b0011010: ctrl = 24'b0000_0011_0100_0000_0000_0000;//8'hx1A:
-        //17'b0011011:ctrl =28'b0000_0110_1110_0000_0000_0000;//8'hx1B:
-        //17'b0011100:ctrl =28'b0100_0110_1111_0000_0000_0000;//8'hx1C:
-        //17'b0011101:ctrl =28'b1010_0110_1110_0000_0000_0000;//8'hx1D:
-        7'b0011110: ctrl = 24'b0000_0001_0010_0000_0000_0000;//8'hx1E:
-        7'b0011111: ctrl = 24'b0001_0001_0010_0000_0000_0000;//8'hx1F:
-        7'b0100000: ctrl = 24'b0100_0001_0011_0000_0000_0000;//8'hx20:
-        7'b0100001: ctrl = 24'b1010_0001_0010_0000_0000_0000;//8'hx21:
-        7'b0100010: ctrl = 24'b0101_0001_0011_0000_0000_0000;//8'hx22:
-        7'b0100011: ctrl = 24'b1011_0001_0010_0000_0000_0000;//8'hx23:
-        7'b0100100: ctrl = 24'b0000_0100_0110_0000_0000_0000;//8'hx24:
-        7'b0100101: ctrl = 24'b0000_0100_1110_0000_0000_0000;//8'hx25:
-        7'b0100110: ctrl = 24'b0001_0100_0110_0000_0000_0000;//8'hx26:
-        7'b0100111: ctrl = 24'b0001_0100_1110_0000_0000_0000;//8'hx27:
-        7'b0101000: ctrl = 24'b0000_0101_0110_0000_0000_0000;//8'hx28:
-        7'b0101001: ctrl = 24'b0000_0101_1100_0000_0000_0000;//8'hx29:
-        7'b0101010: ctrl = 24'b0000_0110_0100_0000_0000_0000;//8'hx2A:
-        7'b0101011: ctrl = 24'b0110_0000_1000_0000_0010_0000;//8'hx2B:
-        7'b0101100: ctrl = 24'b0110_0000_1100_0000_1100_0000;//8'hx2C:
-        7'b0101101: ctrl = 24'b0100_0000_0001_1000_0010_0000;//8'hx2D:
-        7'b0101110: ctrl = 24'b1110_0000_0000_0000_0010_0000;//8'hx2E:
-        7'b0101111: ctrl = 24'b0100_0000_0101_0000_0100_0000;//8'hx2F:
-        7'b0110000: ctrl = 24'b1010_0000_0100_0000_0100_0000;//8'hx30:
-        7'b0110001: ctrl = 24'b0100_0000_1000_0000_0010_0000;//8'hx31:
-        7'b0110010: ctrl = 24'b0100_0000_1100_0000_1100_0000;//8'hx32:
-        7'b0110011: ctrl = 24'b0010_0000_0100_0000_0000_0000;//8'hx33:
-        7'b0110100: ctrl = 24'b1100_0000_0000_0001_0000_0000;//8'hx34:
-        7'b0110101: ctrl = 24'b1100_0000_0000_0010_0000_0000;//8'hx35:
-        7'b0110110: ctrl = 24'b1100_0000_0000_0011_0000_0000;//8'hx36:
-        7'b0110111: ctrl = 24'b1100_0000_0000_0101_0000_0000;//8'hx37:
-        7'b0111000: ctrl = 24'b1100_0000_0000_0110_0000_0000;//8'hx38:
-        7'b0111001: ctrl = 24'b1100_0000_0000_0111_0000_0000;//8'hx39:
-        7'b0111010: ctrl = 24'b0100_0000_0101_0000_0001_0010;//8'hx3A:
-        7'b0111011: ctrl = 24'b0000_0000_0000_0000_0001_0000;//8'hx3B:
-        7'b0111100: ctrl = 24'b0100_0000_0001_0000_0001_0000;//8'hx3C:
-        7'b0111101: ctrl = 24'b1100_0000_0000_0100_0000_0000;//8'hx3D:
-        7'b0111110: ctrl = 24'b0100_0000_0001_1000_0000_1000;//8'hx3E:
-        7'b0111111: ctrl = 24'b1110_0000_0000_0000_0000_1000;//8'hx3F:
-        7'b1000000: ctrl = 24'b0110_0000_1000_0000_0000_1000;//8'hx40:
-        7'b1000001: ctrl = 24'b0100_0000_0101_0000_1000_0100;//8'hx41:
-        7'b1000010: ctrl = 24'b1010_0000_0100_0000_1000_0100;//8'hx42:
-        7'b1000011: ctrl = 24'b0110_0000_1100_0000_1000_0100;//8'hx43:
-        7'b1000100: ctrl = 24'b0000_0000_0000_0000_0001_0001;//8'hx44:
+        7'b0000000: ctrl = 25'b0000_0000_0000_0000_0000_00000;//8'hx00:
+        7'b0000001: ctrl = 25'b0000_0000_0100_0000_1000_00000;//8'hx01:
+        7'b0000010: ctrl = 25'b0000_0000_1110_0000_0000_00000;//8'hx02:
+        7'b0000011: ctrl = 25'b0001_0000_1110_0000_0000_00000;//8'hx03:
+        7'b0000100: ctrl = 25'b0000_0001_0110_0000_0000_00000;//8'hx04:
+        7'b0000101: ctrl = 25'b0001_0001_0110_0000_0000_00000;//8'hx05:
+        7'b0000110: ctrl = 25'b0000_0001_1110_0000_0000_00000;//8'hx06:
+        7'b0000111: ctrl = 25'b0000_0010_0110_0000_0000_00000;//8'hx07:
+        7'b0001000: ctrl = 25'b0000_0010_1110_0000_0000_00000;//8'hx08:
+        7'b0001001: ctrl = 25'b0100_0000_0101_0000_0000_00000;//8'hx09:
+        7'b0001010: ctrl = 25'b1010_0000_0100_0000_0000_00000;//8'hx0A:
+        7'b0001011: ctrl = 25'b0100_0000_1111_0000_0000_00000;//8'hx0B:
+        7'b0001100: ctrl = 25'b1010_0000_1110_0000_0000_00000;//8'hx0C:
+        7'b0001101: ctrl = 25'b0101_0000_1111_0000_0000_00000;//8'hx0D:
+        7'b0001110: ctrl = 25'b1011_0000_1110_0000_0000_00000;//8'hx0E:
+        7'b0001111: ctrl = 25'b0100_0001_0111_0000_0000_00000;//8'hx0F:
+        7'b0010000: ctrl = 25'b1010_0001_0110_0000_0000_00000;//8'hx10:
+        7'b0010001: ctrl = 25'b0101_0001_0111_0000_0000_00000;//8'hx11:
+        7'b0010010: ctrl = 25'b1011_0001_0110_0000_0000_00000;//8'hx12:
+        7'b0010011: ctrl = 25'b0000_0011_1100_0000_0000_00000;//8'hx13:
+        7'b0010100: ctrl = 25'b0100_0001_1111_0000_0000_00000;//8'hx14:
+        7'b0010101: ctrl = 25'b1010_0001_1110_0000_0000_00000;//8'hx15:
+        7'b0010110: ctrl = 25'b0100_0010_0111_0000_0000_00000;//8'hx16:
+        7'b0010111: ctrl = 25'b1010_0010_0110_0000_0000_00000;//8'hx17:
+        7'b0011000: ctrl = 25'b0100_0010_1111_0000_0000_00000;//8'hx18:
+        7'b0011001: ctrl = 25'b1010_0010_1110_0000_0000_00000;//8'hx19:
+        7'b0011010: ctrl = 25'b0000_0011_0100_0000_0000_00000;//8'hx1A:
+        //17'b0011011:ctrl =58'b0000_0110_1110_0000_0000_00000;//8'hx1B:
+        //17'b0011100:ctrl =58'b0100_0110_1111_0000_0000_00000;//8'hx1C:
+        //17'b0011101:ctrl =58'b1010_0110_1110_0000_0000_00000;//8'hx1D:
+        7'b0011110: ctrl = 25'b0000_0001_0010_0000_0000_00000;//8'hx1E:
+        7'b0011111: ctrl = 25'b0001_0001_0010_0000_0000_00000;//8'hx1F:
+        7'b0100000: ctrl = 25'b0100_0001_0011_0000_0000_00000;//8'hx20:
+        7'b0100001: ctrl = 25'b1010_0001_0010_0000_0000_00000;//8'hx21:
+        7'b0100010: ctrl = 25'b0101_0001_0011_0000_0000_00000;//8'hx22:
+        7'b0100011: ctrl = 25'b1011_0001_0010_0000_0000_00000;//8'hx23:
+        7'b0100100: ctrl = 25'b0000_0100_0110_0000_0000_00000;//8'hx24:
+        7'b0100101: ctrl = 25'b0000_0100_1110_0000_0000_00000;//8'hx25:
+        7'b0100110: ctrl = 25'b0001_0100_0110_0000_0000_00000;//8'hx26:
+        7'b0100111: ctrl = 25'b0001_0100_1110_0000_0000_00000;//8'hx27:
+        7'b0101000: ctrl = 25'b0000_0101_0110_0000_0000_00000;//8'hx28:
+        7'b0101001: ctrl = 25'b0000_0101_1100_0000_0000_00000;//8'hx29:
+        7'b0101010: ctrl = 25'b0000_0110_0100_0000_0000_00000;//8'hx2A:
+        7'b0101011: ctrl = 25'b0110_0000_1000_0000_0010_00000;//8'hx2B:
+        7'b0101100: ctrl = 25'b0110_0000_1100_0000_1100_00000;//8'hx2C:
+        7'b0101101: ctrl = 25'b0100_0000_0001_1000_0010_00000;//8'hx2D:
+        7'b0101110: ctrl = 25'b1110_0000_0000_0000_0010_00000;//8'hx2E:
+        7'b0101111: ctrl = 25'b0100_0000_0101_0000_0100_00000;//8'hx2F:
+        7'b0110000: ctrl = 25'b1010_0000_0100_0000_0100_00000;//8'hx30:
+        7'b0110001: ctrl = 25'b0100_0000_1000_0000_0010_00000;//8'hx31:
+        7'b0110010: ctrl = 25'b0100_0000_1100_0000_1100_00000;//8'hx32:
+        //7'b0110011: ctrl = 25'b0010_0000_0100_0000_0000_00000;//8'hx33:
+        7'b0110100: ctrl = 25'b0100_0000_0001_0001_0000_00000;//8'hx34:
+        7'b0110101: ctrl = 25'b0100_0000_0001_0010_0000_00000;//8'hx35:
+        7'b0110110: ctrl = 25'b0100_0000_0001_0011_0000_00000;//8'hx36:
+        7'b0110111: ctrl = 25'b0100_0000_0001_0101_0000_00000;//8'hx37:
+        7'b0111000: ctrl = 25'b0100_0000_0001_0110_0000_00000;//8'hx38:
+        7'b0111001: ctrl = 25'b0100_0000_0001_0111_0000_00000;//8'hx39:
+        7'b0111010: ctrl = 25'b0100_0000_0101_0000_0001_00100;//8'hx3A:
+        7'b0111011: ctrl = 25'b0000_0000_0000_0000_0001_00000;//8'hx3B:
+        7'b0111100: ctrl = 25'b0100_0000_0001_0000_0001_00000;//8'hx3C:
+        7'b0111101: ctrl = 25'b1100_0000_0000_0100_0000_00000;//8'hx3D:
+        7'b0111110: ctrl = 25'b0100_0000_0001_1000_0000_10000;//8'hx3E:
+        7'b0111111: ctrl = 25'b1110_0000_0000_0000_0000_10000;//8'hx3F:
+        7'b1000000: ctrl = 25'b0110_0000_1000_0000_0000_10000;//8'hx40:
+        7'b1000001: ctrl = 25'b0100_0000_0101_0000_1000_01000;//8'hx41:
+        7'b1000010: ctrl = 25'b1010_0000_0100_0000_1000_01000;//8'hx42:
+        7'b1000011: ctrl = 25'b0110_0000_1100_0000_1000_01000;//8'hx43:
+        7'b1000100: ctrl = 25'b0000_0000_0000_0000_0001_00010;//8'hx44:
+        7'b1000101: ctrl = 25'b0110_0000_1100_0000_1000_00001;//8'hx44:
+        7'b1000110: ctrl = 25'b0100_0000_0101_0000_0000_00001;//8'hx44:
+        7'b1000111: ctrl = 25'b1010_0000_0100_0000_0000_00001;//8'hx44:
+        7'b1001000: ctrl = 25'b0100_0000_1100_0000_1000_00001;//8'hx44:
 
-        default:    ctrl = 24'b0000_0000_0000_0000_0000_0000;
+        default:    ctrl = 25'b0000_0000_0000_0000_0000_00000;
     endcase
 end
 
@@ -2289,18 +2307,19 @@ module tt_um_remedy_cpu (
   wire s49;
   wire [15:0] s50;
   wire InterLock;
-  wire ld;
   wire s51;
+  wire s52;
   wire stPC;
   wire [15:0] outR;
   wire fetch_request_pulse;
-  wire s52;
   wire s53;
+  wire s54;
+  wire s55;
   wire [15:0] spi_data;
   wire spi_busy_ram;
   wire Fetch_done;
   wire data_done;
-  wire s54;
+  wire s56;
   wire spi_st;
   wire spi_ld;
   wire [15:0] spi_addr;
@@ -2310,50 +2329,52 @@ module tt_um_remedy_cpu (
   wire spi_cs;
   wire spi_clock_ram;
   wire spi_mosi_ram;
+  wire ld;
   wire st;
-  wire s55;
-  wire WE;
-  wire s56;
+  wire flash_req;
   wire s57;
+  wire WE;
   wire s58;
-  wire abs;
   wire s59;
   wire s60;
+  wire abs;
   wire s61;
   wire s62;
+  wire s63;
+  wire s64;
   wire \sda-in ;
   wire \scl-in ;
-  wire s63;
+  wire s65;
   wire spics_ram;
   wire spics_flash;
   wire sda_o;
   wire scl_o;
   wire sda_oe;
   wire scl_oe;
-  wire [3:0] s64;
-  wire [3:0] s65;
+  wire [3:0] s66;
+  wire [3:0] s67;
   wire [15:0] intr_reg;
-  wire s66;
-  wire s67;
+  wire s68;
+  wire s69;
   wire i2c_inter;
-  wire [7:0] s68;
+  wire [7:0] s70;
   wire [15:0] rngdat0;
   wire [15:0] timerdat1;
-  wire [8:0] s69;
+  wire [8:0] s71;
   wire [15:0] timerdat2;
-  wire [2:0] s70;
+  wire [2:0] s72;
   wire [15:0] i2cDat;
-  wire [4:0] s71;
-  wire s72;
-  wire [3:0] s73;
+  wire [4:0] s73;
   wire s74;
-  wire s75;
+  wire [3:0] s75;
   wire s76;
   wire s77;
   wire s78;
   wire s79;
   wire s80;
   wire s81;
+  wire s82;
+  wire s83;
   assign inputReg[0] = ui_in[0];
   assign inputReg[1] = ui_in[1];
   assign inputReg[2] = ui_in[2];
@@ -2370,13 +2391,13 @@ module tt_um_remedy_cpu (
     .out( s20 )
   );
   assign spi_miso = uio_in[0];
-  assign s59 = uio_in[1];
-  assign s60 = uio_in[2];
-  assign s61 = uio_in[3];
-  assign s62 = uio_in[4];
+  assign s61 = uio_in[1];
+  assign s62 = uio_in[2];
+  assign s63 = uio_in[3];
+  assign s64 = uio_in[4];
   assign \sda-in  = uio_in[5];
   assign \scl-in  = uio_in[6];
-  assign s63 = uio_in[7];
+  assign s65 = uio_in[7];
   ImReg ImReg_i1 (
     .en( imm ),
     .iem( iem ),
@@ -2452,8 +2473,9 @@ module tt_um_remedy_cpu (
     .clk( s20 ),
     .rst_n( rst_n ),
     .fetch_req( fetch_request_pulse ),
-    .ld_req( s52 ),
-    .st_req( s53 ),
+    .ld_req( s53 ),
+    .st_req( s54 ),
+    .flash_req( s55 ),
     .fetch_addr( programAddr ),
     .data_addr( s11 ),
     .store_data( s1 ),
@@ -2462,7 +2484,7 @@ module tt_um_remedy_cpu (
     .mem_rdata( mem_out ),
     .fetch_done( Fetch_done ),
     .data_done( data_done ),
-    .mem_stall( s54 ),
+    .mem_stall( s56 ),
     .spi_st( spi_st ),
     .spi_ld( spi_ld ),
     .spi_addr( spi_addr ),
@@ -2493,6 +2515,7 @@ module tt_um_remedy_cpu (
     .data_done( data_done ),
     .ld( ld ),
     .st( st ),
+    .flash_ld( flash_req ),
     .fetch_req( fetch_request_pulse ),
     .execute_now_pulse( \execute-pulse  )
   );
@@ -2507,12 +2530,12 @@ module tt_um_remedy_cpu (
   );
   // interrupt_controller_small
   interrupt_controller_small interrupt_controller_small_i13 (
-    .dOut( s64 ),
+    .dOut( s66 ),
     .Addr( s11 ),
     .ioW( s40 ),
     .C( s20 ),
     .rst_n( rst_n ),
-    .irq_in( s65 ),
+    .irq_in( s67 ),
     .imm( imm ),
     .reti( Reti ),
     .pc_en( pc_en ),
@@ -2526,7 +2549,7 @@ module tt_um_remedy_cpu (
   // lfsr_RandomNumberGen
   lfsr_RandomNumberGen lfsr_RandomNumberGen_i14 (
     .adrrIn( s11 ),
-    .dataIn( s68 ),
+    .dataIn( s70 ),
     .ioW( s40 ),
     .clk( s20 ),
     .SeedAdr( 16'b1011 ),
@@ -2547,11 +2570,11 @@ module tt_um_remedy_cpu (
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat1 ),
-    .timer_interrupt( s66 )
+    .timer_interrupt( s68 )
   );
   // timer_tiny
   timer_tiny timer_tiny_i16 (
-    .dOut( s69 ),
+    .dOut( s71 ),
     .Addr( s11 ),
     .ioW( s40 ),
     .C( s20 ),
@@ -2563,7 +2586,7 @@ module tt_um_remedy_cpu (
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat2 ),
-    .timer_interrupt( s67 )
+    .timer_interrupt( s69 )
   );
   // RegisterBlock
   RegisterBlock RegisterBlock_i17 (
@@ -2579,7 +2602,7 @@ module tt_um_remedy_cpu (
     .Bits(16)
   )
   Mux_8x1_NBits_i18 (
-    .sel( s70 ),
+    .sel( s72 ),
     .in_0( inputReg ),
     .in_1( outR ),
     .in_2( timerdat1 ),
@@ -2594,8 +2617,8 @@ module tt_um_remedy_cpu (
   i2c_master_ctrl i2c_master_ctrl_i19 (
     .clk( s20 ),
     .rst_n( rst_n ),
-    .wr_en( s72 ),
-    .reg_addr( s73 ),
+    .wr_en( s74 ),
+    .reg_addr( s75 ),
     .cpu_din( s1 ),
     .sda_in( \sda-in  ),
     .scl_in( \scl-in  ),
@@ -2609,7 +2632,7 @@ module tt_um_remedy_cpu (
   assign s37 = (intr & \execute-pulse );
   assign outR[7:0] = uo_out_temp;
   assign outR[15:8] = 8'b0;
-  assign pc_en = (~ s54 & \execute-pulse );
+  assign pc_en = (~ s56 & \execute-pulse );
   assign uio_oe[0] = 1'b0;
   assign uio_oe[1] = 1'b1;
   assign uio_oe[2] = 1'b1;
@@ -2630,27 +2653,27 @@ module tt_um_remedy_cpu (
     .in_1( spi_cs ),
     .out( spics_ram )
   );
-  assign s74 = ~ spi_target;
+  assign s76 = ~ spi_target;
   assign s8 = s7[3:0];
   assign s9 = s7[7:4];
   assign OPcode = s7[15:8];
   assign s42 = s1[7:0];
   assign s19 = s7[7:0];
-  assign s69 = s1[8:0];
-  assign s68 = s1[7:0];
-  assign s64 = s1[3:0];
+  assign s71 = s1[8:0];
+  assign s70 = s1[7:0];
+  assign s66 = s1[3:0];
   singExtend singExtend_i22 (
     .inst( s19 ),
     .\4S ( s3 ),
     .\8SD ( s4 ),
     .\4D ( s5 )
   );
-  assign s65[0] = s49;
-  assign s65[1] = s66;
-  assign s65[2] = s67;
-  assign s65[3] = i2c_inter;
+  assign s67[0] = s49;
+  assign s67[1] = s68;
+  assign s67[2] = s69;
+  assign s67[3] = i2c_inter;
   Mux_2x1 Mux_2x1_i23 (
-    .sel( s74 ),
+    .sel( s76 ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
     .out( spics_flash )
@@ -2686,8 +2709,8 @@ module tt_um_remedy_cpu (
     .aluop3( s28 ),
     .aluop4( s27 ),
     .aluop5( s26 ),
-    .WE( s55 ),
-    .sf( s56 ),
+    .WE( s57 ),
+    .sf( s58 ),
     .iem0( s36 ),
     .iem1( s35 ),
     .br0( s34 ),
@@ -2697,10 +2720,11 @@ module tt_um_remedy_cpu (
     .ld( ld ),
     .st( st ),
     .abs( abs ),
-    .ioW( s57 ),
-    .ioR( s58 ),
+    .ioW( s59 ),
+    .ioR( s60 ),
     .stPC( stPC ),
-    .Reti( Reti )
+    .Reti( Reti ),
+    .flash_req( flash_req )
   );
   Mux_2x1_NBits #(
     .Bits(16)
@@ -2726,13 +2750,15 @@ module tt_um_remedy_cpu (
   assign iem[0] = s35;
   assign iem[1] = s36;
   assign s38 = (\execute-pulse  & Reti);
-  assign s52 = (ld & \execute-pulse );
-  assign s53 = (\execute-pulse  & st);
-  assign WE = ((~ ld & \execute-pulse  & s55) | (s55 & data_done & ld));
-  assign sf = (s56 & \execute-pulse );
-  assign s40 = (s57 & \execute-pulse );
-  assign s51 = (s58 & \execute-pulse );
+  assign s53 = (ld & \execute-pulse );
+  assign s54 = (\execute-pulse  & st);
+  assign WE = (((~ flash_req | ~ ld) & \execute-pulse  & s57) | (s57 & data_done & (flash_req | ld)));
+  assign sf = (s58 & \execute-pulse );
+  assign s40 = (s59 & \execute-pulse );
+  assign s52 = (s60 & \execute-pulse );
   assign s46 = (abs & \execute-pulse );
+  assign s51 = (flash_req | ld);
+  assign s55 = (\execute-pulse  & flash_req);
   Mux_8x1_NBits #(
     .Bits(16)
   )
@@ -2751,8 +2777,8 @@ module tt_um_remedy_cpu (
   // muxEncoder
   muxEncoder muxEncoder_i28 (
     .a( 1'b0 ),
-    .b( ld ),
-    .c( s51 ),
+    .b( s51 ),
+    .c( s52 ),
     .d( stPC ),
     .Q( s10 )
   );
@@ -2795,19 +2821,19 @@ module tt_um_remedy_cpu (
     .\= ( s39 )
   );
   assign s47 = ((s18 ^ br[2]) & \execute-pulse );
-  assign s72 = (s11[4] & s40);
-  assign s71 = s11[4:0];
-  assign s73 = s11[3:0];
+  assign s74 = (s11[4] & s40);
+  assign s73 = s11[4:0];
+  assign s75 = s11[3:0];
   assign s41 = (s39 & s40);
-  assign s75 = s71[0];
-  assign s76 = s71[1];
-  assign s77 = s71[2];
-  assign s78 = s71[3];
-  assign s79 = s71[4];
-  assign s80 = ~ s77;
-  assign s81 = ~ s76;
-  assign s70[0] = ((~ s79 & s80 & s81 & s75) | (s78 & s81 & s75) | (s78 & s80 & s81) | (s77 & s76));
-  assign s70[1] = (s79 | (~ s78 & s76) | (~ s78 & s77) | (s78 & s80 & s81));
-  assign s70[2] = (s79 | (s78 & s76 & s75) | (s78 & s77));
+  assign s77 = s73[0];
+  assign s78 = s73[1];
+  assign s79 = s73[2];
+  assign s80 = s73[3];
+  assign s81 = s73[4];
+  assign s82 = ~ s79;
+  assign s83 = ~ s78;
+  assign s72[0] = ((~ s81 & s82 & s83 & s77) | (s80 & s83 & s77) | (s80 & s82 & s83) | (s79 & s78));
+  assign s72[1] = (s81 | (~ s80 & s78) | (~ s80 & s79) | (s80 & s82 & s83));
+  assign s72[2] = (s81 | (s80 & s78 & s77) | (s80 & s79));
   assign uo_out = uo_out_temp;
 endmodule

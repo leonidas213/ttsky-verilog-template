@@ -257,15 +257,14 @@ I2cCommand = 20                 ; when you want to write to the bus you can exxe
 | `0x28` | `asr rd` | Shifts register Rd by one bit to the right. The MSB remains unchanged and the lowest bit is moved to the carry bit. |
 | `0x29` | `swap rd` | Swaps the high and low byte in register Rd. |
 | `0x2A` | `swapn rd` | Swaps the high and low nibbles of both bytes in register Rd. |
-| `0x2B` | `st [rd], rs` | Stores the content of register Rs to the memory at the address [Rd]. |
-| `0x2C` | `ld rd, [rs]` | Loads the value at memory address [Rs] to register Rd. |
-| `0x2D` | `st i16, rd` | Stores the content of register Rs to memory at the location given by [const]. |
-| `0x2E` | `st u4, rd` | Stores the content of register Rs to memory at the location given by [const]. |
-| `0x2F` | `ld rd, i16` | Loads the memory value at the location given by [const] to register Rd. |
-| `0x30` | `ld rd, u4` | Loads the memory value at the location given by [const] to register Rd. |
-| `0x31` | `st [rd + value], rs` | Stores the content of register Rs to the memory at the address (Rd+[const]). |
-| `0x31` | `st [rd - value], rs` | Stores the content of register Rs to the memory at the address (Rd+[const]). |
-| `0x32` | `ld rd, [rs + value]` | Loads the value at memory address (Rs+[const]) to register Rd. |
+| `0x2B` | `st [rd], rs` | Stores the content of register Rs to the memory at the address [Rd] from Ram. |
+| `0x2C` | `ld rd, [rs]` | Loads the value at memory address [Rs] to register Rd from Ram. |
+| `0x2D` | `st i16, rd` | Stores the content of register Rs to memory at the location given by [const] from Ram. |
+| `0x2E` | `st u4, rd` | Stores the content of register Rs to memory at the location given by [const] from Ram. |
+| `0x2F` | `ld rd, i16` | Loads the memory value at the location given by [const] to register Rd from Ram. |
+| `0x30` | `ld rd, u4` | Loads the memory value at the location given by [const] to register Rd from Ram. |
+| `0x31` | `st [rd + value], rs` | Stores the content of register Rs to the memory at the address (Rd+[const]) from Ram. |
+| `0x32` | `ld rd, [rs + value]` | Loads the value at memory address (Rs+[const]) to register Rd from Ram. |
 | `0x33` | `Reserved` | |
 | `0x34` | `jumpCarry i8` | Jump if Carry flag is set. (Relative, max jump +-128).  |
 | `0x35` | `jumpZero i8` | Jump if Zero flag is set. (Relative, max jump +-128).    |
@@ -277,10 +276,16 @@ I2cCommand = 20                 ; when you want to write to the bus you can exxe
 | `0x3B` | `rret rs` |   |
 | `0x3C` | `jump i16` | absolute Jump to memory address. |
 | `0x3D` | `jump i16` | relative Jump to memory address if address are between +-128. |
-| `0x3E` | `out i16, rd` | writes Rd register value to the immediate address.  |
-| `0x3F` | `out u4, rd` |  writes Rd register value to the immediate address. |
+| `0x3E` | `out i16, rs` | writes Rd register value to the immediate address.  |
+| `0x3F` | `out u4, rs` |  writes Rd register value to the immediate address. |
 | `0x40` | `outr [rd], rs` |  writes Rd value to the adress in the Rs register. |
 | `0x41` | `in rd, i16` | Reads the value at immediate address into Rd.  |
 | `0x42` | `in rd, u4` |  Reads the value at immediate address into Rd. |
 | `0x43` | `inr rd, [rs]` | Reads the value at Rs value address into Rd.  |
 | `0x44` | `reti` | Only used in interrupt function. it will return to the address when the interrupt happened.  |
+| `0x45` | `ldf rd, [rs]` | Reads the value at Rs value address into Rd from flash memory.  |
+| `0x46` | `ldf rd, i16` | Reads the immediate address into Rd from flash memory.  |
+| `0x47` | `ldf rd, u4` | Reads the immediate address into Rd from flash memory.  |
+| `0x48` | `ldf rd, [rs + value]` | Loads the value at memory address (Rs+[const]) to register Rd from flash memory.  |
+
+

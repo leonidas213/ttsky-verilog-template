@@ -169,388 +169,507 @@ I2cCommand = 20                 ; when you want to write to the bus you can exxe
 ; Configuration for CustomAssembly to how to compile
 #bankdef data
 {
-#bits 16
-#outp 0
+    #bits 16
+    #outp 0
 }
 #subruledef timers
 {
-timer1 => 0
-timer2 => 1
+    timer1 => 5
+    timer2 => 9
 }
 #subruledef registers
 {
-r0  => 0
-r1  => 1
-r2  => 2
-r3  => 3
-r4  => 4
-r5  => 5
-r6  => 6
-r7  => 7
-r8  => 8
-r9  => 9
-r10 => 10
-r11 => 11
-r12 => 12
-r13 => 13                      ; bp
-r14 => 14                      ; sp
-r15 => 15                      ; ra
-BP=>0xd                        ; branch pointer
-SP=>0xe                        ; stack pointer
-RA=>0xf                        ; return addres
+    r0  => 0
+    r1  => 1
+    r2  => 2
+    r3  => 3
+    r4  => 4
+    r5  => 5
+    r6  => 6
+    r7  => 7
+    r8  => 8
+    r9  => 9
+    r10 => 0xa
+    r11 => 0xb
+    r12 => 0xc
+    r13 => 0xd          ; bp
+    r14 => 0xe          ; sp
+    r15 => 0xf          ; ra
+    BP => 0xd           ; branch pointer
+    SP => 0xe           ; stack pointer
+    RA => 0xf           ; return addres
 
 }
+
 #ruledef
 {
-;todo investigate jump logic potential bug maybe
-;todo add an instruction to store program counter that doesnt jump
 
-; Does nothing.
-nop => 0x0000
-;______________________________________________________________________
-; Move the content of Rs to register Rd
-mov {rd:registers}, {rs:registers} => 0x01 @rd`4 @rs`4
-;______________________________________________________________________
-; Adds the content of register Rs or an immediate constant [value] to register Rd without carry.
-add {rd:registers}, {rs:registers} => 0x02 @rd`4 @rs`4
-add {rd:registers}, {value: u4} =>
-{
-0x0c @rd`4 @value`4
-}
-add {rd:registers}, {value:i16} =>
-{
-lv=value[15:15]
-(0x8000 | value)`16 @0x0b @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Adds the content of register Rs or an immediate constant [value] to register Rd with carry.
-adc {rd:registers}, {rs:registers} => 0x03 @rd`4 @rs`4
-adc {rd:registers}, {value: u4} =>
-{
-0x0e @rd`4 @value`4
-}
-adc {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x0d @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Subtracts the content of register Rs or an immediate constant [value] from register Rd without carry.
-sub {rd:registers}, {rs:registers} => 0x04 @rd`4 @rs`4
-sub {rd:registers}, {value: u4} =>
-{
-0x10 @rd`4 @value`4
-}
-sub {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x0f @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Subtracts the content of register Rs or an immediate constant [value] from register Rd with carry.
-sbc {rd:registers}, {rs:registers} => 0x05 @rd`4 @rs`4
-sbc {rd:registers}, {value: u4} =>
-{
-0x12 @rd`4 @value`4
-}
-sbc {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x11 @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Performs a bitwise AND between Rd and Rs or an immediate constant [value], and stores the result in Rd.
-and {rd:registers}, {rs:registers} => 0x06 @rd`4 @rs`4
-and {rd:registers}, {value: u4} =>
-{
-0x15 @rd`4 @value`4
-}
-and {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x14 @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Performs a bitwise OR between Rd and Rs or an immediate constant [value], and stores the result in Rd.
-or  {rd:registers}, {rs:registers} => 0x07 @rd`4 @rs`4
-or  {rd:registers}, {value: u4} =>
-{
-0x17 @rd`4 @value`4
-}
-or  {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x16 @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Performs a bitwise XOR between Rd and Rs or an immediate constant [value], and stores the result in Rd.
-xor {rd:registers}, {rs:registers} => 0x08 @rd`4 @rs`4
-xor {rd:registers}, {value: u4} =>
-{
-0x19 @rd`4 @value`4
-}
-xor {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x18 @rd`4 @lv`4
-}
-;______________________________________________________________________
-;Loads Register Rd with the constant value [value].
-ldi {rd:registers}, {value: u4} =>
-{
-0x0a @rd`4 @value`4
-}
-ldi {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x09 @rd`4 @lv`4
-}
-;______________________________________________________________________
-;Stores the two's complement of Rd in register Rd.
-neg {rd:registers} => 0x13 @rd`4 @0`4
-;______________________________________________________________________
-;Stores not Rd in register Rd.
-not {rd:registers} => 0x1a @rd`4 @0`4
-;______________________________________________________________________
-;
-;
-; There were once a multiplication and a division
-; But it doesn't fit to the chip :(
-;
-;
-;______________________________________________________________________
-; Compares Rd, and Rs or an immediate constant [value] (subtracts Rs from Rd without storing the result) Without using carry flag.
-; Flags are updated accordingly.
-cmp {rd:registers}, {rs:registers} => 0x1e @rd`4 @rs`4
-cmp {rd:registers}, {value: u4} =>
-{
-0x21 @rd`4 @value`4
-}
-cmp {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x20 @rd`4 @lv`4
-}
-;______________________________________________________________________
-; Compares Rd, and Rs or an immediate constant [value] (subtracts Rs from Rd without storing the result) With carry flag.
-; Flags are updated accordingly.
-cpc {rd:registers}, {rs:registers} => 0x1f @rd`4 @rs`4
-cpc {rd:registers}, {value: u4} =>
-{
-0x23 @rd`4 @value`4
-}
-cpc {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x22 @rd`4 @lv`4
-}
-;______________________________________________________________________
+    ;todo add an instruction to store program counter that doesnt jump
+    ;______________________________________________________________________
+    ; Does nothing.
+    nop => 0x0000
+    ;______________________________________________________________________
+    ; Move the content of Rs to register Rd
+    mov {rd:registers}, {rs:registers} => 0x01 @rd`4 @rs`4
+    ;______________________________________________________________________
+    ; Adds the content of register Rs or an immediate constant [value] to register Rd without carry.
+    add {rd:registers}, {rs:registers} => 0x02 @rd`4 @rs`4
+    add {rd:registers}, {value: u4} =>
+    {
+        0x0c @rd`4 @value`4
+    }
+    add {rd:registers}, {value:i16} =>
+    {
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x0b @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Adds the content of register Rs or an immediate constant [value] to register Rd with carry.
+    adc {rd:registers}, {rs:registers} => 0x03 @rd`4 @rs`4
+    adc {rd:registers}, {value: u4} =>
+    {
+        0x0e @rd`4 @value`4
+    }
+    adc {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x0d @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Subtracts the content of register Rs or an immediate constant [value] from register Rd without carry.
+    sub {rd:registers}, {rs:registers} => 0x04 @rd`4 @rs`4
+    sub {rd:registers}, {value: u4} =>
+    {
+        0x10 @rd`4 @value`4
+    }
+    sub {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x0f @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Subtracts the content of register Rs or an immediate constant [value] from register Rd with carry.
+    sbc {rd:registers}, {rs:registers} => 0x05 @rd`4 @rs`4
+    sbc {rd:registers}, {value: u4} =>
+    {
+        0x12 @rd`4 @value`4
+    }
+    sbc {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x11 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Performs a bitwise AND between Rd and Rs or an immediate constant [value], and stores the result in Rd.
+    and {rd:registers}, {rs:registers} => 0x06 @rd`4 @rs`4
+    and {rd:registers}, {value: u4} =>
+    {
+        0x15 @rd`4 @value`4
+    }
+    and {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x14 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Performs a bitwise OR between Rd and Rs or an immediate constant [value], and stores the result in Rd.
+    or  {rd:registers}, {rs:registers} => 0x07 @rd`4 @rs`4
+    or  {rd:registers}, {value: u4} =>
+    {
+        0x17 @rd`4 @value`4
+    }
+    or  {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x16 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Performs a bitwise XOR between Rd and Rs or an immediate constant [value], and stores the result in Rd.
+    xor {rd:registers}, {rs:registers} => 0x08 @rd`4 @rs`4
+    xor {rd:registers}, {value: u4} =>
+    {
+    0x19 @rd`4 @value`4
+    }
+    xor {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x18 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ;Loads Register Rd with the constant value [value].
+    ldi {rd:registers}, {value: u4} =>
+    {
+    0x0a @rd`4 @value`4
+    }
+    ldi {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x09 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ;Stores the two's complement of Rd in register Rd.
+    neg {rd:registers} => 0x13 @rd`4 @0`4
+    ;______________________________________________________________________
+    ;Stores not Rd in register Rd.
+    not {rd:registers} => 0x1a @rd`4 @0`4
+    ;______________________________________________________________________
+    ;
+    ;
+    ; There were once a multiplication and a division
+    ; But it doesn't fit to the chip :(
+    ;
+    ;
+    ;______________________________________________________________________
+    ; Compares Rd, and Rs or an immediate constant [value] (subtracts Rs from Rd without storing the result) Without using carry flag.
+    ; Flags are updated accordingly.
+    cmp {rd:registers}, {rs:registers} => 0x1e @rd`4 @rs`4
+    cmp {rd:registers}, {value: u4} =>
+    {
+        0x21 @rd`4 @value`4
+    }
+    cmp {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x20 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; Compares Rd, and Rs or an immediate constant [value] (subtracts Rs from Rd without storing the result) With carry flag.
+    ; Flags are updated accordingly.
+    cpc {rd:registers}, {rs:registers} => 0x1f @rd`4 @rs`4
+    cpc {rd:registers}, {value: u4} =>
+    {
+        0x23 @rd`4 @value`4
+    }
+    cpc {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x22 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
 
-;Shifts register Rd by one bit to the left. A zero bit is filled in and the highest bit is moved to the carry bit.
-lsl {rd:registers} => 0x24 @rd`4 @0`4
+    ;Shifts register Rd by one bit to the left. A zero bit is filled in and the highest bit is moved to the carry bit.
+    lsl {rd:registers} => 0x24 @rd`4 @0`4
 
-;Shifts register Rd by one bit to the right. A zero bit is filled in and the lowest bit is moved to the carry bit.
-lsr {rd:registers} => 0x25 @rd`4 @0`4
+    ;Shifts register Rd by one bit to the right. A zero bit is filled in and the lowest bit is moved to the carry bit.
+    lsr {rd:registers} => 0x25 @rd`4 @0`4
 
-;Shifts register Rd by one bit to the left. The carry bit is filled in and the highest bit is moved to the carry bit.
-rol {rd:registers} => 0x26 @rd`4 @0`4
+    ;Shifts register Rd by one bit to the left. The carry bit is filled in and the highest bit is moved to the carry bit.
+    rol {rd:registers} => 0x26 @rd`4 @0`4
 
-;Shifts register Rd by one bit to the right. The carry bit is filled in and the lowest bit is moved to the carry bit.
-ror {rd:registers} => 0x27 @rd`4 @0`4
+    ;Shifts register Rd by one bit to the right. The carry bit is filled in and the lowest bit is moved to the carry bit.
+    ror {rd:registers} => 0x27 @rd`4 @0`4
 
-;Shifts register Rd by one bit to the right. The MSB
-;remains unchanged and the lowest bit is moved to the carry bit
-asr {rd:registers} => 0x28 @rd`4 @0`4
+    ;Shifts register Rd by one bit to the right. The MSB
+    ;remains unchanged and the lowest bit is moved to the carry bit
+    asr {rd:registers} => 0x28 @rd`4 @0`4
 
-;Swaps the high and low byte in register Rd.
-swap {rd:registers} => 0x29 @rd`4 @0`4
+    ;Swaps the high and low byte in register Rd.
+    swap {rd:registers} => 0x29 @rd`4 @0`4
 
-;Swaps the high and low nibbles of both bytes in register Rd.
-swapn {rd:registers} => 0x2a @rd`4 @0`4
+    ;Swaps the high and low nibbles of both bytes in register Rd.
+    swapn {rd:registers} => 0x2a @rd`4 @0`4
 
-;______________________________________________________________________
-;Stores the content of register Rs to the memory at the
-;address [Rd]
-st  [{rd:registers}], {rs:registers} => 0x2b @rd`4 @rs`4
+    ;______________________________________________________________________
+    ;Stores the content of register Rs to the memory at the
+    ;address [Rd]
+    st  [{rd:registers}], {rs:registers} => 0x2b @rd`4 @rs`4
 
-;Loads the value at memory address [Rs] to register Rd
-ld  {rd:registers}, [{rs:registers}] => 0x2c @rd`4 @rs`4
-;______________________________________________________________________
-;Stores the content of register Rs to memory at the
-;location given by [const].
-st  {value: u4}, {rd:registers} =>
-{
-0x2e @value`4 @rd`4
-}
-st  {value:i16}, {rd:registers} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x2d @lv`4 @rd`4
-}
-;______________________________________________________________________
-;Loads the memory value at the location given by
-;[const] to register Rd.
-ld  {rd:registers}, {value: u4} =>
-{
-0x30 @rd`4 @value`4
-}
-ld  {rd:registers}, {value:i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x2f @rd`4 @lv`4
-}
-;______________________________________________________________________
-;Stores the value at memory address (Rd +- [const]) to
-;register Rs.
-st  [{rd:registers} + {value}], {rs:registers} =>
-{
-(0x8000 | value)`16 @0x31 @rd`4 @rs`4
-}
-st  [{rd:registers} - {value}], {rs:registers} =>
-{   vtemp=0-value
-(0x8000 | vtemp)`16 @0x31 @rd`4 @rs`4
-}
-;______________________________________________________________________
-;Loads the value at memory address (Rs +- [const]) to
-;register Rd.
-ld  {rd:registers}, [{rs:registers} + {value}] =>
-{
-(0x8000 | value)`16 @0x32 @rd`4 @rs`4
-}
-ld  {rd:registers}, [{rs:registers} - {value}] =>
-{
-vtemp=0-value
-(0x8000 | vtemp)`16 @0x32 @rd`4 @rs`4
-}
-;______________________________________________________________________
-; jumps to the address given by [const] if the specified flag condition is met.  
-; it jumps relatively if the target address is within -128 to 127 bytes from the current pc.
-; it will raise an error if the target address is out of range for relative jump.   
-; Yeah.. its a design flaw... I need to fix this so the range doesn't matter..
-jumpCarry {value: i8} =>
-{   relad=(value-pc-1)
-0x34 @relad`8
-}
-jumpZero {value: i8} =>
-{   relad=(value-pc-1)
-0x35 @relad`8
-}
-jumpNegative {value: i8} =>
-{   relad=(value-pc-1)
-0x36 @relad`8
-}
-jumpNotCarry {value: i8} =>
-{   relad=(value-pc-1)
-0x37 @relad`8
-}
-jumpNotZero {value: i8} =>
-{   relad=(value-pc-1)
-0x38 @relad`8
-}
-jumpNotNegative {value: i8} =>
-{   relad=(value-pc-1)
-0x39 @relad`8
-}
-;______________________________________________________________________
-; jump to the address and store current pc in Rs
-; if there is a value in the Rs it will be overwritten
-; so you need to store the Rs value somewhere if you want to use it later
-rcall {rd:registers}, {value:i16} =>
-{
-lv=value[15:15]
-(0x8000 | value)`16 @0x3a @rd`4 @lv`4
-}
-; return to the address stored in Rs
-rret {rs:registers} =>
-{
-0x3b @0`4 @rs`4
-}
+    ;Loads the value at memory address [Rs] to register Rd
+    ld  {rd:registers}, [{rs:registers}] => 0x2c @rd`4 @rs`4
+    ;______________________________________________________________________
+    ;Stores the content of register Rs to memory at the
+    ;location given by [const].
+    st  {value: u4}, {rd:registers} =>
+    {
+        0x2e @value`4 @rd`4
+    }
+    st  {value:i16}, {rd:registers} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x2d @lv`4 @rd`4
+    }
+    ;______________________________________________________________________
+    ;Loads the memory value at the location given by
+    ;[const] to register Rd.
+    ld  {rd:registers}, {value: u4} =>
+    {
+        0x30 @rd`4 @value`4
+    }
+    ld  {rd:registers}, {value:i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x2f @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ;Stores the value at memory address (Rd +- [const]) to
+    ;register Rs.
+    st  [{rd:registers} + {value}], {rs:registers} =>
+    {
+        (0x8000 | value)`16 @0x31 @rd`4 @rs`4
+    }
+    st  [{rd:registers} - {value}], {rs:registers} =>
+    {   
+        vtemp = 0 - value
+        (0x8000 | vtemp)`16 @0x31 @rd`4 @rs`4
+    }
+    ;______________________________________________________________________
+    ;Loads the value at memory address (Rs +- [const]) to
+    ;register Rd.
+    ld  {rd:registers}, [{rs:registers} + {value}] =>
+    {
+        (0x8000 | value)`16 @0x32 @rd`4 @rs`4
+    }
+    ld  {rd:registers}, [{rs:registers} - {value}] =>
+    {
+        vtemp = 0 - value
+        (0x8000 | vtemp)`16 @0x32 @rd`4 @rs`4
+    }
+    ;______________________________________________________________________
+    ; jumps to the address given by [const] if the specified flag condition is met.  
+    ; it jumps relatively if Carry flag is set
+    jumpCarry {value: i16} =>
+    {   
+        relad = (value - pc- 2)
+        lv = relad[15:15]
+        (0x8000 | relad)`16 @0x34 @0`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; jumps to the address given by [const] if the specified flag condition is met.  
+    ; it jumps relatively if Zero flag is set
+    jumpZero {value: i16} =>
+    {   
+        relad = (value - pc- 2)
+        lv = relad[15:15]
+        (0x8000 | relad)`16 @0x35 @0`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; jumps to the address given by [const] if the specified flag condition is met.  
+    ; it jumps relatively if Negative flag is set
+    jumpNegative {value: i16} =>
+    {  
+        relad = (value - pc- 2)
+        lv = relad[15:15]
+        (0x8000 | relad)`16 @0x36 @0`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; jumps to the address given by [const] if the specified flag condition is met.  
+    ; it jumps relatively if Carry flag is not set
+    jumpNotCarry {value: i16} =>
+    {   
+        relad = (value - pc- 2)
+        lv = relad[15:15]
+        (0x8000 | relad)`16 @0x37 @0`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; jumps to the address given by [const] if the specified flag condition is met.  
+    ; it jumps relatively if Zero flag is not set
+    jumpNotZero {value: i16} =>
+    {   
+        relad = (value - pc- 2)
+        lv = relad[15:15]
+        (0x8000 | relad)`16 @0x38 @0`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; jumps to the address given by [const] if the specified flag condition is met.  
+    ; it jumps relatively if Negative flag is not set
+    jumpNotNegative {value: i16} =>
+    {       
+        relad = (value - pc - 2)
+        lv = relad[15:15]
+        (0x8000 | relad)`16 @0x39 @0`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ; jump to the address and store current pc in Rs
+    ; if there is a value in the Rs it will be overwritten
+    ; so you need to store the Rs value somewhere if you want to use it later
+    rcall {rd:registers}, {value:i16} =>
+    {
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x3a @rd`4 @lv`4
+    }
+    ; return to the address stored in Rs
+    rret {rs:registers} =>
+    {
+        0x3b @0`4 @rs`4
+    }
 
-; jump to the address given by [const] unconditionally.
-; It jumps relatively if the target address is within -128 to 127 bytes from the current pc.
-jump {value: i16} =>            ; relative
-{   
-    relad=(value-pc-1)
-    assert(relad <= 129)
-    assert(relad >= -129)
-    0x3d @relad`8
-}
+    ; jump to the address given by [const] unconditionally.
+    ; It jumps relatively if the target address is within -128 to 127 bytes; relative from the current pc.
+    jump {value: i16} =>            
+    {   
+        relad = (value - pc-1)
+        assert(relad <= 129)
+        assert(relad >= -129)
+        0x3d @relad`8
+    }
 
-; jump to the address given by [const] unconditionally.
-; it will jump to the given address
-jump {value: i16} =>           ; absolute
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x3c @0`4 @lv`4
-}
+    ; jump to the address given by [const] unconditionally.
+    ; it will jump to the given address; absolute
+    jump {value: i16} =>           
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x3c @0`4 @lv`4
+    }
 
-;peripheral access instructions
-out {value: u4}, {rd:registers} =>
-{
-0x3f @value`4 @rd`4
-}
-out {value: i16}, {rd:registers} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x3e @lv`4 @rd`4
-}
+    ;peripheral access instructions
+    out {value: u4}, {rd:registers} =>
+    {
+        0x3f @value`4 @rd`4
+    }
+    out {value: i16}, {rd:registers} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x3e @lv`4 @rd`4
+    }
 
-outr [{rd:registers}], {rs:registers} =>
-{
-0x40 @rd`4 @rs`4
-}
+    outr [{rd:registers}], {rs:registers} =>
+    {
+        0x40 @rd`4 @rs`4
+    }
 
-in  {rd:registers}, {value: i16} =>
-{   lv=value[15:15]
-(0x8000 | value)`16 @0x41 @rd`4 @lv`4
-}
-in  {rd:registers}, {value: u4}=>
-{
-0x42 @rd`4 @value`4
-}
-inr {rd:registers}, [{rs:registers}] =>
-{
-0x43 @rd`4 @rs`4
-}
+    in  {rd:registers}, {value: i16} =>
+    {   
+        lv = value[15:15]
+        (0x8000 | value)`16 @0x41 @rd`4 @lv`4
+    }
+    in  {rd:registers}, {value: u4}=>
+    {
+        0x42 @rd`4 @value`4
+    }
+    inr {rd:registers}, [{rs:registers}] =>
+    {
+        0x43 @rd`4 @rs`4
+    }
+    ; When an interrupt happens it will store the current pc in the PC controller.
+    ; And then it will jump to the interrupt handler at address 0x0002. 
+    ; When you finish handling the interrupt you need to use "reti" to jump back 
+    ; to the address stored in the PC controller and continue execution.
+    reti => 0x44 @0`4 @0`4
+    ;______________________________________________________________________
+    ;Loads the memory value at the location given by
+    ; register [Rs] to register Rd
+    ldf {rd:registers}, [{rs:registers}] => 0x45 @rd`4 @rs`4
+    ;______________________________________________________________________
+    ;Loads the memory value at the location given by
+    ;[const] to register Rd.
+    ldf  {rd:registers}, {value: u4} =>
+    {
+        0x47 @rd`4 @value`4
+    }
+    ldf  {rd:registers}, {value:i16} =>
+    {   lv = value[15:15]
+        (0x8000 | value)`16 @0x46 @rd`4 @lv`4
+    }
+    ;______________________________________________________________________
+    ;Loads the value at memory address (Rs +- [const]) to
+    ;register Rd.
+    ldf  {rd:registers}, [{rs:registers} + {value}] =>
+    {
+        (0x8000 | value)`16 @0x48 @rd`4 @rs`4
+    }
+    ldf  {rd:registers}, [{rs:registers} - {value}] =>
+    {
+        vtemp = 0 - value
+        (0x8000 | vtemp)`16 @0x48 @rd`4 @rs`4
+    }
 
 
-; When an interrupt happens it will store the current pc in the PC controller.
-; And then it will jump to the interrupt handler at address 0x0002. 
-; When you finish handling the interrupt you need to use "reti" to jump back 
-; to the address stored in the PC controller and continue execution.
-reti => 0x44 @0`4 @0`4
+    ;--------------macros-----------------------
+    ;______________________________________________________________________
+    ;Put the lower 8 bits of the register Rd to the output port
+    putoutput {rd:registers} => asm
+    {
+        out OutputReg, {rd}
+    }
 
-;--------------macros-----------------------
+    ;______________________________________________________________________
+    ;Read the 8 bits of the input port and put them in to the register Rd
+    getinput {rd:registers} => asm
+    {
+        in {rd}, InputReg
+    }
 
-readTimer {value: timers}, {rd:registers} => asm{
-in  rd, value+1
+    ;______________________________________________________________________
+    ;Read the current timer value and put them in to the register Rd
+    readTimer {value: timers}, {rd:registers} => asm{
+        in  rd, value
+    }
 
-}
-getinput {rd:registers} =>
-{
-0x42 @rd`4 @0x4`4
-}
-zero {rd:registers} => asm{
-    ldi {rd}, 0
-}
-zero_all => asm{
-    zero r0
-    zero r1
-    zero r2
-    zero r3
-    zero r4
-    zero r5
-    zero r6
-    zero r7
-    zero r8
-    zero r9
-    zero r10
-    zero r11
-    zero r12
-    zero r13
-    zero r14
-    zero r15
-}
-dec {rd:registers} => asm{
-    sub {rd}, 1
-}
-inc {rd:registers} => asm{
-    add {rd}, 1
-}
+    ;______________________________________________________________________
+    ;Configure timer using Register R12
+    configureTimer {timer:timers},{inter_enable:u1}, {reload:u1}, {prescaler:u3}, {enable:u1} => asm
+    {
+        tempval = (inter_enable << 6) |(reload << 5) | (prescaler << 1) | enable
+        timerConfig = timer - 3
 
-loadStr {string:i16}, {startAdr:i32} => asm{
+        ldi r12, tempval
+        out timerConfig, r12
 
-    ld  r0, {startAdr}
-    st  {string}, r0
+    }
 
-}
+    ;______________________________________________________________________
+    ;Set timer target using Register R12
+    setTimerTarget {timer:timers}, {value:i16} => asm
+    {
+        timerTarget = timer - 2
+        ldi r12, value
+        out timerTarget, r12
+
+    }
+
+    ;______________________________________________________________________
+    ;Reset timer using Register R12
+    resetTimer {timer:timers} => asm
+    {
+
+        timerTarget = timer - 1
+        ldi r12, value
+        out timerTarget, r12
+
+    }
+
+    ;______________________________________________________________________
+    ;Start both timers at the same time using Register R12
+    syncStartTimers => asm
+    {
+        ldi r12, 1
+        out timerSyncStart, r12
+    }
+
+    ;Write Zero to the register Rd
+    zero {rd:registers} => asm{
+        ldi {rd}, 0
+    }
+
+    ;Write Zero to all registers
+    zero_all => asm{
+        zero r0
+        zero r1
+        zero r2
+        zero r3
+        zero r4
+        zero r5
+        zero r6
+        zero r7
+        zero r8
+        zero r9
+        zero r10
+        zero r11
+        zero r12
+        zero r13
+        zero r14
+        zero r15
+    }
+
+    ;Decrements register Rd by one
+    dec {rd:registers} => asm{
+        sub {rd}, 1
+    }
+
+    ;Increments register Rd by one
+    inc {rd:registers} => asm{
+        add {rd}, 1
+    }
 
 pop {rd:registers}=> asm{
     ld  {rd}, [SP]
@@ -616,12 +735,9 @@ _scall {value} =>asm{
     ld  RA, [SP]
     add SP, 1
 }
-enableOutput {rd:registers} => asm{
-out OutputEnable, {rd}}
 
-putoutput {rd:registers} => asm{
-out OutputReg, {rd}
-}
+
+
 readRandomRange {rd:registers}, {min:i16}, {max:i16}, {rDummy1:registers}, {rDummy2:registers} => asm{
     ldi rDummy1, {min}
     ldi rDummy2, {max}
@@ -643,34 +759,8 @@ disableInterrupt => asm{
     ldi r12, 0
     out CpuinterruptEnable, r12
 }
-configureTimer {timer:timers}, {reload:u1}, {prescaler:u3}, {enable:u1} =>{
-tempval= (reload<<4) | (prescaler<<1) | enable
-tempval2=timerConfig+( timer *3)
 
-lv=tempval[15:15]
-((0x8000 | tempval)`16 @0x09 @12`4 @lv`4)@ 0x3f @tempval2`4 @12`4
 
-;ldi r12, tempval
-;out (tempval2), r12
-}
-setTimerTarget {timer:timers}, {value:i16} => {
-tempval=timerTarget+( timer *3)
-
-lv=value[15:15]
-
-((0x8000 | value)`16 @0x09 @12`4 @lv`4 ) @ 0x3f @tempval`4 @12`4
-;ldi r12, value
-;out tempval, r12
-
-}
-resetTimer {timer:timers} => {
-
-tempval=timerReset+( timer *3)
-(0x0a @12`4 @1`4)@ 0x3f @tempval`4 @12`4
-; ldi r12, 1
-;out (tempval), r12
-
-}
 
 
 

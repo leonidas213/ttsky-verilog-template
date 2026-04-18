@@ -546,23 +546,23 @@ async def test_cpu_cmp_jumpzero(dut):
     pins, flash, ram = await boot_cpu(dut)
     flash.trace_fetch = True
 
-    #   0:0 |    0 |       ; start:
-    #   0:0 |    0 | 3d 02 ; jump main
-    #   2:0 |    1 | 00 00 ; nop
-    #   4:0 |    2 | 44 00 ; reti
-    #   6:0 |    3 |       ; main:
-    #   6:0 |    3 | 0a 05 ; ldi r0, 5
-    #   8:0 |    4 | 0a 15 ; ldi r1, 5
-    #   a:0 |    5 | 1e 01 ; cmp r0, r1
-    #   c:0 |    6 | 35 03 ; jumpZero equal_label
-    #   e:0 |    7 | 0a 21 ; ldi r2, 1
-    #  10:0 |    8 | 3f 12 ; putoutput r2
-    #  12:0 |    9 | 3d 02 ; jump forever
-    #  14:0 |    a |       ; equal_label:
-    #  14:0 |    a | 0a 29 ; ldi r2, 9
-    #  16:0 |    b | 3f 12 ; putoutput r2
-    #  18:0 |    c |       ; forever:
-    #  18:0 |    c | 3d ff ; jump forever
+    #   0:0 |    0 |             ; start:
+    #   0:0 |    0 | 3d 02       ; jump main
+    #   2:0 |    1 | 00 00       ; nop
+    #   4:0 |    2 | 44 00       ; reti
+    #   6:0 |    3 |             ; main:
+    #   6:0 |    3 | 0a 05       ; ldi r0, 5
+    #   8:0 |    4 | 0a 15       ; ldi r1, 5
+    #   a:0 |    5 | 1e 01       ; cmp r0, r1
+    #   c:0 |    6 | 80 03 35 00 ; jumpZero equal_label
+    #   e:0 |    7 | 0a 21       ; ldi r2, 1
+    #  10:0 |    8 | 3f 12       ; putoutput r2
+    #  12:0 |    9 | 3d 02       ; jump forever
+    #  14:0 |    a |             ; equal_label:
+    #  14:0 |    a | 0a 29       ; ldi r2, 9
+    #  16:0 |    b | 3f 12       ; putoutput r2
+    #  18:0 |    c |             ; forever:
+    #  18:0 |    c | 3d ff       ; jump forever
 
     flash.poke16w(0x0000, 0x3D02)
     flash.poke16w(0x0001, 0x0000)
@@ -570,13 +570,14 @@ async def test_cpu_cmp_jumpzero(dut):
     flash.poke16w(0x0003, 0x0A05)
     flash.poke16w(0x0004, 0x0A15)
     flash.poke16w(0x0005, 0x1E01)
-    flash.poke16w(0x0006, 0x3503)
-    flash.poke16w(0x0007, 0x0A21)
-    flash.poke16w(0x0008, 0x3F12)
-    flash.poke16w(0x0009, 0x3D02)
-    flash.poke16w(0x000A, 0x0A29)
-    flash.poke16w(0x000B, 0x3F12)
-    flash.poke16w(0x000C, 0x3DFF)
+    flash.poke16w(0x0006, 0x8003)
+    flash.poke16w(0x0007, 0x3500)
+    flash.poke16w(0x0008, 0x0A21)
+    flash.poke16w(0x0009, 0x3F12)
+    flash.poke16w(0x000A, 0x3D02)
+    flash.poke16w(0x000B, 0x0A29)
+    flash.poke16w(0x000C, 0x3F12)
+    flash.poke16w(0x000D, 0x3DFF)
 
     cocotb.start_soon(flash.run())
     cocotb.start_soon(ram.run())
@@ -592,23 +593,23 @@ async def test_cpu_cmp_jumpnotzero(dut):
     pins, flash, ram = await boot_cpu(dut)
     flash.trace_fetch = True
 
-    #   0:0 |    0 |       ; start:
-    #   0:0 |    0 | 3d 02 ; jump main
-    #   2:0 |    1 | 00 00 ; nop
-    #   4:0 |    2 | 44 00 ; reti
-    #   6:0 |    3 |       ; main:
-    #   6:0 |    3 | 0a 05 ; ldi r0, 5
-    #   8:0 |    4 | 0a 14 ; ldi r1, 4
-    #   a:0 |    5 | 1e 01 ; cmp r0, r1
-    #   c:0 |    6 | 38 03 ; jumpNotZero noteq_label
-    #   e:0 |    7 | 0a 21 ; ldi r2, 1
-    #  10:0 |    8 | 3f 12 ; putoutput r2
-    #  12:0 |    9 | 3d 02 ; jump forever
-    #  14:0 |    a |       ; noteq_label:
-    #  14:0 |    a | 0a 28 ; ldi r2, 8
-    #  16:0 |    b | 3f 12 ; putoutput r2
-    #  18:0 |    c |       ; forever:
-    #  18:0 |    c | 3d ff ; jump forever
+    #   0:0 |    0 |             ; start:
+    #   0:0 |    0 | 3d 02       ; jump main
+    #   2:0 |    1 | 00 00       ; nop
+    #   4:0 |    2 | 44 00       ; reti
+    #   6:0 |    3 |             ; main:
+    #   6:0 |    3 | 0a 05       ; ldi r0, 5
+    #   8:0 |    4 | 0a 14       ; ldi r1, 4
+    #   a:0 |    5 | 1e 01       ; cmp r0, r1
+    #   c:0 |    6 | 80 03 38 00 ; jumpNotZero noteq_label
+    #   e:0 |    7 | 0a 21       ; ldi r2, 1
+    #  10:0 |    8 | 3f 12       ; putoutput r2
+    #  12:0 |    9 | 3d 02       ; jump forever
+    #  14:0 |    a |             ; noteq_label:
+    #  14:0 |    a | 0a 28       ; ldi r2, 8
+    #  16:0 |    b | 3f 12       ; putoutput r2
+    #  18:0 |    c |             ; forever:
+    #  18:0 |    c | 3d ff       ; jump forever
 
     flash.poke16w(0x0000, 0x3D02)
     flash.poke16w(0x0001, 0x0000)
@@ -616,13 +617,14 @@ async def test_cpu_cmp_jumpnotzero(dut):
     flash.poke16w(0x0003, 0x0A05)
     flash.poke16w(0x0004, 0x0A14)
     flash.poke16w(0x0005, 0x1E01)
-    flash.poke16w(0x0006, 0x3803)
-    flash.poke16w(0x0007, 0x0A21)
-    flash.poke16w(0x0008, 0x3F12)
-    flash.poke16w(0x0009, 0x3D02)
-    flash.poke16w(0x000A, 0x0A28)
-    flash.poke16w(0x000B, 0x3F12)
-    flash.poke16w(0x000C, 0x3DFF)
+    flash.poke16w(0x0006, 0x8003)
+    flash.poke16w(0x0007, 0x3800)
+    flash.poke16w(0x0008, 0x0A21)
+    flash.poke16w(0x0009, 0x3F12)
+    flash.poke16w(0x000A, 0x3D02)
+    flash.poke16w(0x000B, 0x0A28)
+    flash.poke16w(0x000C, 0x3F12)
+    flash.poke16w(0x000D, 0x3DFF)
 
     cocotb.start_soon(flash.run())
     cocotb.start_soon(ram.run())
@@ -1116,7 +1118,7 @@ async def test_cpu_jumpcarry_taken(dut):
     #  6:0 |    3 |             ; main:
     #  6:0 |    3 | ff ff 09 01 ; ldi r0, 0xFFFF
     #  a:0 |    5 | 0c 01       ; add r0, 1
-    #  c:0 |    6 | 34 03       ; jumpCarry carry_label
+    #  c:0 |    6 | 80 03 34 00 ; jumpCarry carry_label
     #  e:0 |    7 | 0a 11       ; ldi r1, 1
     # 10:0 |    8 | 3f 11       ; putoutput r1
     # 12:0 |    9 | 3d 02       ; jump forever
@@ -1132,13 +1134,14 @@ async def test_cpu_jumpcarry_taken(dut):
     flash.poke16w(0x0003, 0xFFFF)
     flash.poke16w(0x0004, 0x0901)
     flash.poke16w(0x0005, 0x0C01)
-    flash.poke16w(0x0006, 0x3403)
-    flash.poke16w(0x0007, 0x0A11)
-    flash.poke16w(0x0008, 0x3F11)
-    flash.poke16w(0x0009, 0x3D02)
-    flash.poke16w(0x000A, 0x0A16)
-    flash.poke16w(0x000B, 0x3F11)
-    flash.poke16w(0x000C, 0x3DFF)
+    flash.poke16w(0x0006, 0x8003)
+    flash.poke16w(0x0007, 0x3400)
+    flash.poke16w(0x0008, 0x0A11)
+    flash.poke16w(0x0009, 0x3F11)
+    flash.poke16w(0x000A, 0x3D02)
+    flash.poke16w(0x000B, 0x0A16)
+    flash.poke16w(0x000C, 0x3F11)
+    flash.poke16w(0x000D, 0x3DFF)
 
     cocotb.start_soon(flash.run())
     cocotb.start_soon(ram.run())
@@ -1161,7 +1164,7 @@ async def test_cpu_lsl_sets_carry(dut):
     #  6:0 |    3 |             ; main:
     #  6:0 |    3 | 80 00 09 01 ; ldi r0, 0x8000
     #  a:0 |    5 | 24 00       ; lsl r0
-    #  c:0 |    6 | 34 03       ; jumpCarry carry_label
+    #  c:0 |    6 | 80 03 34 00 ; jumpCarry carry_label
     #  e:0 |    7 | 0a 11       ; ldi r1, 1
     # 10:0 |    8 | 3f 11       ; putoutput r1
     # 12:0 |    9 | 3d 02       ; jump forever
@@ -1177,13 +1180,14 @@ async def test_cpu_lsl_sets_carry(dut):
     flash.poke16w(0x0003, 0x8000)
     flash.poke16w(0x0004, 0x0901)
     flash.poke16w(0x0005, 0x2400)
-    flash.poke16w(0x0006, 0x3403)
-    flash.poke16w(0x0007, 0x0A11)
-    flash.poke16w(0x0008, 0x3F11)
-    flash.poke16w(0x0009, 0x3D02)
-    flash.poke16w(0x000A, 0x0A15)
-    flash.poke16w(0x000B, 0x3F11)
-    flash.poke16w(0x000C, 0x3DFF)
+    flash.poke16w(0x0006, 0x8003)
+    flash.poke16w(0x0007, 0x3400)
+    flash.poke16w(0x0008, 0x0A11)
+    flash.poke16w(0x0009, 0x3F11)
+    flash.poke16w(0x000A, 0x3D02)
+    flash.poke16w(0x000B, 0x0A15)
+    flash.poke16w(0x000C, 0x3F11)
+    flash.poke16w(0x000D, 0x3DFF)
 
     cocotb.start_soon(flash.run())
     cocotb.start_soon(ram.run())
@@ -1199,35 +1203,36 @@ async def test_cpu_lsr_sets_carry(dut):
     pins, flash, ram = await boot_cpu(dut)
     flash.trace_fetch = True
 
-    #  0:0 |    0 |       ; start:
-    #  0:0 |    0 | 3d 02 ; jump main
-    #  2:0 |    1 | 00 00 ; nop
-    #  4:0 |    2 | 44 00 ; reti
-    #  6:0 |    3 |       ; main:
-    #  6:0 |    3 | 0a 01 ; ldi r0, 1
-    #  8:0 |    4 | 25 00 ; lsr r0
-    #  a:0 |    5 | 34 03 ; jumpCarry carry_label
-    #  c:0 |    6 | 0a 11 ; ldi r1, 1
-    #  e:0 |    7 | 3f 11 ; putoutput r1
-    # 10:0 |    8 | 3d 02 ; jump forever
-    # 12:0 |    9 |       ; carry_label:
-    # 12:0 |    9 | 0a 14 ; ldi r1, 4
-    # 14:0 |    a | 3f 11 ; putoutput r1
-    # 16:0 |    b |       ; forever:
-    # 16:0 |    b | 3d ff ; jump forever
+    #  0:0 |    0 |             ; start:
+    #  0:0 |    0 | 3d 02       ; jump main
+    #  2:0 |    1 | 00 00       ; nop
+    #  4:0 |    2 | 44 00       ; reti
+    #  6:0 |    3 |             ; main:
+    #  6:0 |    3 | 0a 01       ; ldi r0, 1
+    #  8:0 |    4 | 25 00       ; lsr r0
+    #  a:0 |    5 | 80 03 34 00 ; jumpCarry carry_label
+    #  c:0 |    6 | 0a 11       ; ldi r1, 1
+    #  e:0 |    7 | 3f 11       ; putoutput r1
+    # 10:0 |    8 | 3d 02       ; jump forever
+    # 12:0 |    9 |             ; carry_label:
+    # 12:0 |    9 | 0a 14       ; ldi r1, 4
+    # 14:0 |    a | 3f 11       ; putoutput r1
+    # 16:0 |    b |             ; forever:
+    # 16:0 |    b | 3d ff       ; jump forever
 
     flash.poke16w(0x0000, 0x3D02)
     flash.poke16w(0x0001, 0x0000)
     flash.poke16w(0x0002, 0x4400)
     flash.poke16w(0x0003, 0x0A01)
     flash.poke16w(0x0004, 0x2500)
-    flash.poke16w(0x0005, 0x3403)
-    flash.poke16w(0x0006, 0x0A11)
-    flash.poke16w(0x0007, 0x3F11)
-    flash.poke16w(0x0008, 0x3D02)
-    flash.poke16w(0x0009, 0x0A14)
-    flash.poke16w(0x000A, 0x3F11)
-    flash.poke16w(0x000B, 0x3DFF)
+    flash.poke16w(0x0005, 0x8003)
+    flash.poke16w(0x0006, 0x3400)
+    flash.poke16w(0x0007, 0x0A11)
+    flash.poke16w(0x0008, 0x3F11)
+    flash.poke16w(0x0009, 0x3D02)
+    flash.poke16w(0x000A, 0x0A14)
+    flash.poke16w(0x000B, 0x3F11)
+    flash.poke16w(0x000C, 0x3DFF)
 
     cocotb.start_soon(flash.run())
     cocotb.start_soon(ram.run())
@@ -1280,24 +1285,24 @@ async def test_cpu_ror_uses_carry(dut):
     pins, flash, ram = await boot_cpu(dut)
     flash.trace_fetch = True
 
-    #  0:0 |    0 |       ; start:
-    #  0:0 |    0 | 3d 02 ; jump main
-    #  2:0 |    1 | 00 00 ; nop
-    #  4:0 |    2 | 44 00 ; reti
-    #  6:0 |    3 |       ; main:
-    #  6:0 |    3 | 0a 20 ; ldi r2, 0
-    #  8:0 |    4 | 10 21 ; sub r2, 1
-    #  a:0 |    5 | 0a 00 ; ldi r0, 0
-    #  c:0 |    6 | 27 00 ; ror r0
-    #  e:0 |    7 | 36 03 ; jumpNegative neg_label
-    # 10:0 |    8 | 0a 11 ; ldi r1, 1
-    # 12:0 |    9 | 3f 11 ; putoutput r1
-    # 14:0 |    a | 3d 02 ; jump forever
-    # 16:0 |    b |       ; neg_label:
-    # 16:0 |    b | 0a 13 ; ldi r1, 3
-    # 18:0 |    c | 3f 11 ; putoutput r1
-    # 1a:0 |    d |       ; forever:
-    # 1a:0 |    d | 3d ff ; jump forever
+    #  0:0 |    0 |             ; start:
+    #  0:0 |    0 | 3d 02       ; jump main
+    #  2:0 |    1 | 00 00       ; nop
+    #  4:0 |    2 | 44 00       ; reti
+    #  6:0 |    3 |             ; main:
+    #  6:0 |    3 | 0a 20       ; ldi r2, 0
+    #  8:0 |    4 | 10 21       ; sub r2, 1
+    #  a:0 |    5 | 0a 00       ; ldi r0, 0
+    #  c:0 |    6 | 27 00       ; ror r0
+    #  e:0 |    7 | 80 03 36 00 ; jumpNegative neg_label
+    # 10:0 |    8 | 0a 11       ; ldi r1, 1
+    # 12:0 |    9 | 3f 11       ; putoutput r1
+    # 14:0 |    a | 3d 02       ; jump forever
+    # 16:0 |    b |             ; neg_label:
+    # 16:0 |    b | 0a 13       ; ldi r1, 3
+    # 18:0 |    c | 3f 11       ; putoutput r1
+    # 1a:0 |    d |             ; forever:
+    # 1a:0 |    d | 3d ff       ; jump forever
 
     flash.poke16w(0x0000, 0x3D02)
     flash.poke16w(0x0001, 0x0000)
@@ -1306,13 +1311,14 @@ async def test_cpu_ror_uses_carry(dut):
     flash.poke16w(0x0004, 0x1021)
     flash.poke16w(0x0005, 0x0A00)
     flash.poke16w(0x0006, 0x2700)
-    flash.poke16w(0x0007, 0x3603)
-    flash.poke16w(0x0008, 0x0A11)
-    flash.poke16w(0x0009, 0x3F11)
-    flash.poke16w(0x000A, 0x3D02)
-    flash.poke16w(0x000B, 0x0A13)
-    flash.poke16w(0x000C, 0x3F11)
-    flash.poke16w(0x000D, 0x3DFF)
+    flash.poke16w(0x0007, 0x8003)
+    flash.poke16w(0x0008, 0x3600)
+    flash.poke16w(0x0009, 0x0A11)
+    flash.poke16w(0x000A, 0x3F11)
+    flash.poke16w(0x000B, 0x3D02)
+    flash.poke16w(0x000C, 0x0A13)
+    flash.poke16w(0x000D, 0x3F11)
+    flash.poke16w(0x000E, 0x3DFF)
 
     cocotb.start_soon(flash.run())
     cocotb.start_soon(ram.run())
@@ -2314,6 +2320,63 @@ async def test_cpu_timer1_interrupt_basic(dut):
 
     await flash.wait_instructions(60)
     assert dut.uo_out.value == 0x77, f"Expected 0x77 but got {dut.uo_out.value}"
+
+@cocotb.test()
+async def test_cpu_flash_read(dut):
+    dut._log.info("Starting flash read test")
+    pins, flash, ram = await boot_cpu(dut)
+    flash.trace_fetch = True
+
+    #   0:0 |    0 |             ; start:
+    #   0:0 |    0 | 80 02 37 00 ; jumpNotCarry main
+    #   4:0 |    2 | 00 00       ; nop
+    #   6:0 |    3 | 44 00       ; reti
+    #   8:0 |    4 |             ; main:
+    #   8:0 |    4 | 80 ff 09 10 ; ldi r1, 0xff
+    #   c:0 |    6 |             ; main1:
+    #   c:0 |    6 | 45 01       ; ldf r0, [r1]
+    #   e:0 |    7 | 3f 10       ; putoutput r0
+    #  10:0 |    8 | 0c 11       ; add r1, 1
+    #  12:0 |    9 | ff fb 39 01 ; jumpNotNegative main1
+    # 1fe:0 |   ff |             ; lab:
+    # 1fe:0 |   ff | 00 2f       ; 0x2f
+    # 200:0 |  100 | 00 13       ; 0x13
+    # 202:0 |  101 | 00 b2       ; 0xb2
+    # 204:0 |  102 | 00 a4       ; 0xa4
+    # 206:0 |  103 | 00 2f       ; 0x2f
+
+    flash.poke16w(0x0000, 0x8002)   
+    flash.poke16w(0x0001, 0x3700)
+    flash.poke16w(0x0002, 0x0000)
+    flash.poke16w(0x0003, 0x4400)
+    flash.poke16w(0x0004, 0x80FF)
+    flash.poke16w(0x0005, 0x0910)
+    flash.poke16w(0x0006, 0x4501)
+    flash.poke16w(0x0007, 0x3F10)
+    flash.poke16w(0x0008, 0x0C11)
+    flash.poke16w(0x0009, 0xFFFB)
+    flash.poke16w(0x000A, 0x3901)
+    flash.poke16w(0x00FF, 0x002F)
+    flash.poke16w(0x0100, 0x0013)
+    flash.poke16w(0x0101, 0x00B2)
+    flash.poke16w(0x0102, 0x00A4)
+    flash.poke16w(0x0103, 0x002F)
+
+    
+    cocotb.start_soon(flash.run())
+    cocotb.start_soon(ram.run())
+    await reset_dut(dut)
+
+    await flash.wait_instructions(9)
+    assert dut.uo_out.value == 0x2F, f"Expected 0x2F but got {dut.uo_out.value}"
+    await flash.wait_instructions(3)
+    assert dut.uo_out.value == 0x13, f"Expected 0x13 but got {dut.uo_out.value}"
+    await flash.wait_instructions(3)
+    assert dut.uo_out.value == 0xB2, f"Expected 0xB2 but got {dut.uo_out.value}"
+    await flash.wait_instructions(3)
+    assert dut.uo_out.value == 0xA4, f"Expected 0xA4 but got {dut.uo_out.value}"
+    await flash.wait_instructions(3)
+    assert dut.uo_out.value == 0x2F, f"Expected 0x2F but got {dut.uo_out.value}"
 
 
 """i2cCtrl   = 0x10
