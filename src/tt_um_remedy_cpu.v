@@ -206,7 +206,6 @@ module programCounter
     input  wire        intr,
     input  wire        reti,
     input  wire        relJmp,
-    output wire [15:0] Nextpc,
     output wire [15:0] PC
   );
 
@@ -214,9 +213,7 @@ module programCounter
   reg [15:0] interruptAdress;
 
   reg [15:0] PCr;
-  reg [15:0] Nextpcr;
 
-  assign Nextpc = Nextpcr;
   assign PC     = PCr;
 
   always @(posedge clk , negedge rst_n)
@@ -224,7 +221,6 @@ module programCounter
     if (!rst_n)
     begin
       PCr     <= 16'h0000;
-      Nextpcr <= 16'h0001;
       interruptAdress <= 16'h0000;
     end
     else if (pc_en)
@@ -232,7 +228,6 @@ module programCounter
       if (reti)
       begin
         PCr     <= interruptAdress + 16'd1;
-        Nextpcr <= interruptAdress + 16'd2;
       end
       else if (intr)
       begin
@@ -242,257 +237,24 @@ module programCounter
           interruptAdress <= PCr;
 
         PCr     <= interuptFuncAdr;
-        Nextpcr <= interuptFuncAdr + 16'd1;
       end
       else if (relJmp)
       begin
         PCr     <= PCr + AluIn + 16'd1;
-        Nextpcr <= Nextpcr + AluIn + 16'd1;
       end
       else if (absJmp)
       begin
         PCr     <= AluIn;
-        Nextpcr <= AluIn + 16'd1;
       end
       else
       begin
         PCr     <= PCr + 16'd1;
-        Nextpcr <= Nextpcr + 16'd1;
       end
     end
   end
 
 endmodule
 
-
-module Mux_2x1_NBits #(
-    parameter Bits = 2
-)
-(
-    input [0:0] sel,
-    input [(Bits - 1):0] in_0,
-    input [(Bits - 1):0] in_1,
-    output reg [(Bits - 1):0] out
-);
-    always @ (*) begin
-        case (sel)
-            1'h0: out = in_0;
-            1'h1: out = in_1;
-            default:
-                out = 'h0;
-        endcase
-    end
-endmodule
-
-module memory_wait_controller
-(
-    input  wire        clk,
-    input  wire        rst_n,
-
-    // CPU side
-    input  wire        fetch_req,
-    input  wire        ld_req,
-    input  wire        st_req,
-    input  wire        flash_req,
-
-    input  wire [15:0] fetch_addr,
-    input  wire [15:0] data_addr,
-    input  wire [15:0] store_data,
-
-    output reg  [15:0] mem_rdata,
-    output reg         fetch_done,
-    output reg         data_done,
-    output reg         mem_stall,
-
-    // SPI engine side
-    output reg         spi_st,
-    output reg         spi_ld,
-    output reg  [15:0] spi_addr,
-    output reg  [15:0] spi_data_in,
-    output reg         spi_target,   // 0 = flash, 1 = ram
-
-    // NEW
-    output reg         spi_fast,     // fresh flash read uses fast-read (0x0B)
-    output reg         spi_seq,      // continue current flash sequential burst
-
-    input  wire [15:0] spi_data_out,
-    input  wire        spi_busy
-);
-
-  localparam OP_NONE  = 2'd0;
-  localparam OP_FETCH = 2'd1;
-  localparam OP_LOAD  = 2'd2;
-  localparam OP_STORE = 2'd3;
-
-  localparam S_IDLE           = 3'd0;
-  localparam S_START          = 3'd1;
-  localparam S_WAIT_BUSY_HIGH = 3'd2;
-  localparam S_WAIT_BUSY_LOW  = 3'd3;
-  localparam S_FINISH         = 3'd4;
-  localparam FLASH_SEQ_STEP = 16'd1;
-
-  reg [2:0] state;
-  reg [1:0] op;
-
-  reg       use_flash_seq;
-  reg       flash_stream_valid;
-  reg [15:0] last_flash_addr;
-
-  wire flash_seq_hit;
-  assign flash_seq_hit =
-      flash_stream_valid &&
-      (fetch_addr == (last_flash_addr + FLASH_SEQ_STEP));
-
-  always @(posedge clk or negedge rst_n)
-  begin
-    if (!rst_n)
-    begin
-      state             <= S_IDLE;
-      op                <= OP_NONE;
-
-      mem_rdata         <= 16'h0000;
-      fetch_done        <= 1'b0;
-      data_done         <= 1'b0;
-      mem_stall         <= 1'b0;
-
-      spi_st            <= 1'b0;
-      spi_ld            <= 1'b0;
-      spi_addr          <= 16'h0000;
-      spi_data_in       <= 16'h0000;
-      spi_target        <= 1'b0;
-      spi_fast          <= 1'b0;
-      spi_seq           <= 1'b0;
-
-      use_flash_seq     <= 1'b0;
-      flash_stream_valid<= 1'b0;
-      last_flash_addr   <= 16'h0000;
-    end
-    else
-    begin
-      fetch_done <= 1'b0;
-      data_done  <= 1'b0;
-      spi_st     <= 1'b0;
-      spi_ld     <= 1'b0;
-      spi_fast   <= 1'b0;
-      spi_seq    <= 1'b0;
-
-      case (state)
-        S_IDLE:
-        begin
-          mem_stall <= 1'b0;
-          op        <= OP_NONE;
-
-          if (st_req)
-          begin
-            op            <= OP_STORE;
-            spi_target    <= 1'b1;      // RAM
-            spi_addr      <= data_addr;
-            spi_data_in   <= store_data;
-            use_flash_seq <= 1'b0;
-            mem_stall     <= 1'b1;
-            state         <= S_START;
-          end
-          else if (ld_req)
-          begin
-            op            <= OP_LOAD;
-            spi_target    <= 1'b1;      // RAM
-            spi_addr      <= data_addr;
-            spi_data_in   <= 16'h0000;
-            use_flash_seq <= 1'b0;
-            mem_stall     <= 1'b1;
-            state         <= S_START;
-          end
-          else if (fetch_req)
-          begin
-            op            <= OP_FETCH;
-            spi_target    <= 1'b0;      // FLASH
-            spi_addr      <= fetch_addr;
-            spi_data_in   <= 16'h0000;
-            use_flash_seq <= flash_seq_hit;
-            mem_stall     <= 1'b1;
-            state         <= S_START;
-          end
-          else if(flash_req)
-            begin
-            op            <= OP_LOAD;
-            spi_target    <= 1'b0;      // FLASH
-            spi_addr      <= data_addr;
-            spi_data_in   <= 16'h0000;
-            use_flash_seq <= 1'b0;
-            mem_stall     <= 1'b1;
-            state         <= S_START;
-          end
-        end
-
-        S_START:
-        begin
-          if (op == OP_STORE)
-          begin
-            spi_st <= 1'b1;
-          end
-          else if (op == OP_LOAD)
-          begin
-            spi_ld <= 1'b1;
-          end
-          else if (op == OP_FETCH)
-          begin
-            spi_ld <= 1'b1;
-
-            if (use_flash_seq)
-              spi_seq <= 1'b1;
-            else
-              spi_fast <= 1'b1;
-          end
-
-          state <= S_WAIT_BUSY_HIGH;
-        end
-
-        S_WAIT_BUSY_HIGH:
-        begin
-          if (spi_busy)
-            state <= S_WAIT_BUSY_LOW;
-        end
-
-        S_WAIT_BUSY_LOW:
-        begin
-          if (!spi_busy)
-          begin
-            if (op == OP_LOAD || op == OP_FETCH)
-              mem_rdata <= spi_data_out;
-
-            state <= S_FINISH;
-          end
-        end
-
-        S_FINISH:
-        begin
-          mem_stall <= 1'b0;
-
-          if (op == OP_FETCH)
-          begin
-            fetch_done         <= 1'b1;
-            flash_stream_valid <= 1'b1;
-            last_flash_addr    <= spi_addr;
-          end
-          else
-          begin
-            data_done          <= 1'b1;
-            flash_stream_valid <= 1'b0;
-          end
-
-          state <= S_IDLE;
-        end
-
-        default:
-        begin
-          state             <= S_IDLE;
-          flash_stream_valid<= 1'b0;
-        end
-      endcase
-    end
-  end
-
-endmodule
 module spi_memory_interface (
     input  wire        clk,           // System clock
     input  wire        spi_rst_n,       // Reset
@@ -501,7 +263,6 @@ module spi_memory_interface (
     input  wire [15:0] addr,          // 16-bit memory address
     input  wire [15:0] data_in,       // 16-bit data input (for write)
     output reg  [15:0] data_out,      // 16-bit data output (for read)
-    input  wire        is_continous,  // Continuous transaction flag
     output reg         spi_cs,        // SPI Chip Select (Active Low)
     output reg         spi_clk,       // SPI Clock
     output reg         busy,          // Busy signal
@@ -537,7 +298,6 @@ module spi_memory_interface (
 
   reg [0:0] prev_command;
   reg [15:0] prev_addr;
-  reg prev_is_continous;
   wire [23:0] spi_addr;
   assign spi_addr = {7'b0000000, addr, 1'b0};
 
@@ -570,7 +330,6 @@ module spi_memory_interface (
 
             prev_command <= command;
             prev_addr <= addr;
-            prev_is_continous <= is_continous;
 
             if (st)
             begin
@@ -718,8 +477,7 @@ module spi_memory_interface (
         decideFate:
         begin
           if (command == prev_command &&
-              addr == prev_addr + 1 &&
-              is_continous == prev_is_continous)
+              addr == prev_addr + 1 )
           begin
             // Continue without releasing CS
             shift_reg <= command ? data_in[15:8] : 8'h00;
@@ -748,85 +506,6 @@ module spi_memory_interface (
 
 endmodule
 
-module cpu_cycle_controller
-  (
-    input  wire clk,
-    input  wire rst_n,
-
-    input  wire fetch_done,
-    input  wire data_done,
-
-    input  wire ld,
-    input  wire st,
-    input  wire flash_ld,
-
-
-    output wire fetch_req,
-    output wire execute_now_pulse
-  );
-
-  localparam S_REQ_FETCH  = 2'd0;
-  localparam S_WAIT_FETCH = 2'd1;
-  localparam S_EXECUTE    = 2'd2;
-  localparam S_WAIT_DATA  = 2'd3;
-
-  reg [1:0] state;
-
-  wire execute_now;
-  assign execute_now = (state == S_EXECUTE);
-  assign fetch_req   = (state == S_REQ_FETCH);
-
-  always @(posedge clk , negedge rst_n)
-  begin
-    if (!rst_n)
-    begin
-      state <= S_REQ_FETCH;
-    end
-    else
-    begin
-      case (state)
-        S_REQ_FETCH:
-          state <= S_WAIT_FETCH;
-
-        S_WAIT_FETCH:
-        begin
-          if (fetch_done)
-            state <= S_EXECUTE;
-        end
-
-        S_EXECUTE:
-        begin
-          if (ld || st || flash_ld)
-            state <= S_WAIT_DATA;
-          else
-            state <= S_REQ_FETCH;
-        end
-
-        S_WAIT_DATA:
-        begin
-          if (data_done)
-            state <= S_REQ_FETCH;
-        end
-
-        default:
-          state <= S_REQ_FETCH;
-      endcase
-    end
-  end
-
-  // rise detector
-  reg sig_d;
-  always @(posedge clk, negedge rst_n)
-  begin
-    if (!rst_n)
-      sig_d <= 1'b0;
-    else
-      sig_d <= execute_now;
-  end
-
-  assign execute_now_pulse = execute_now & ~sig_d;
-endmodule
-
 module interrupt_controller_small (
     input  [3:0] dOut,
     input  [15:0] Addr,
@@ -834,7 +513,7 @@ module interrupt_controller_small (
     input         C,
     input         rst_n,
 
-    input  [3:0]  irq_in,
+    input  [2:0]  irq_in,
     input         imm,
     input         reti,
     input         pc_en,
@@ -850,8 +529,8 @@ module interrupt_controller_small (
 
   reg       global_enable;
   reg       irq_lock_r   ;
-  reg [3:0] irq_enable   ;
-  reg [3:0] irq_pending  ;
+  reg [2:0] irq_enable   ;
+  reg [2:0] irq_pending  ;
 
   wire wr_ctrl;
   wire wr_enable;
@@ -861,8 +540,8 @@ module interrupt_controller_small (
   wire rd_enable;
   wire rd_pending;
 
-  wire [3:0] pending_with_new_irq;
-  wire [3:0] active_irq;
+  wire [2:0] pending_with_new_irq;
+  wire [2:0] active_irq;
   wire       intr_take;
 
   assign wr_ctrl    = ioW && (Addr == CPUInterruptEnableAddr);
@@ -904,7 +583,7 @@ module interrupt_controller_small (
 
       // write 1 to clear pending bits
       if (wr_pending)
-        irq_pending <= pending_with_new_irq & ~dOut[3:0];
+        irq_pending <= pending_with_new_irq & ~dOut[2:0];
 
       // lock once interrupt is actually taken
       if (intr_take)
@@ -918,8 +597,8 @@ module interrupt_controller_small (
 
   assign InterruptOut =
       rd_ctrl    ? {13'h0000, intr, irq_lock_r, global_enable} :
-      rd_enable  ? {12'h000, irq_enable} :
-      rd_pending ? {12'h000, irq_pending} :
+      rd_enable  ? {13'h000, irq_enable} :
+      rd_pending ? {13'h000, irq_pending} :
       16'h0000;
 
 endmodule
@@ -976,7 +655,7 @@ module timer (
 
   reg [15:0] target       ;
   reg [15:0] count        ;
-  reg [14:0] prescale_cnt ;
+  reg [10:0] prescale_cnt ;
   reg [6:0]  conf         ;
 
   wire wr_conf   = ioW && (Addr == timerConfigAddr);
@@ -1021,16 +700,6 @@ module timer (
         tick = &prescale_cnt[8:0];    // /512
       4'd10:
         tick = &prescale_cnt[9:0];    // /1024
-      4'd11:
-        tick = &prescale_cnt[10:0];   // /2048
-      4'd12:
-        tick = &prescale_cnt[11:0];   // /4096
-      4'd13:
-        tick = &prescale_cnt[12:0];   // /8192
-      4'd14:
-        tick = &prescale_cnt[13:0];   // /16384
-      4'd15:
-        tick = &prescale_cnt[14:0];   // /32768
       default:
         tick = 1'b1;
     endcase
@@ -1042,7 +711,7 @@ module timer (
     begin
       target       <= 16'h0000;
       count        <= 16'h0000;
-      prescale_cnt <= 15'h0000;
+      prescale_cnt <= 11'h000;
       conf         <= 7'h00;
     end
     else
@@ -1050,7 +719,7 @@ module timer (
       if (wr_conf)
       begin
         conf         <= dOut[6:0];
-        prescale_cnt <= 15'h0000;
+        prescale_cnt <= 11'h000;
       end
 
       if (wr_target)
@@ -1067,7 +736,7 @@ module timer (
       else
       begin
         if (timer_en)
-          prescale_cnt <= prescale_cnt + 15'd1;
+          prescale_cnt <= prescale_cnt + 11'd1;
 
         if (timer_en && !InterLock)
         begin
@@ -1112,7 +781,7 @@ module timer_tiny (
 
   reg [8:0] target        ;
   reg [8:0] count         ;
-  reg [14:0] prescale_cnt  ;
+  reg [10:0] prescale_cnt  ;
   reg [6:0]  conf         ;
 
   wire wr_conf   = ioW && (Addr == timerConfigAddr);
@@ -1159,14 +828,6 @@ module timer_tiny (
         tick = &prescale_cnt[9:0];    // /1024
       4'd11:
         tick = &prescale_cnt[10:0];   // /2048
-      4'd12:
-        tick = &prescale_cnt[11:0];   // /4096
-      4'd13:
-        tick = &prescale_cnt[12:0];   // /8192
-      4'd14:
-        tick = &prescale_cnt[13:0];   // /16384
-      4'd15:
-        tick = &prescale_cnt[14:0];   // /32768
       default:
         tick = 1'b1;
     endcase
@@ -1178,7 +839,7 @@ module timer_tiny (
     begin
       target       <= 8'h00;
       count        <= 8'h00;
-      prescale_cnt <= 15'h0000;
+      prescale_cnt <= 11'h000;
       conf         <= 7'h00;
     end
     else
@@ -1186,7 +847,7 @@ module timer_tiny (
       if (wr_conf)
       begin
         conf         <= dOut[6:0];
-        prescale_cnt <= 15'h0000;
+        prescale_cnt <= 11'h000;
       end
 
       if (wr_target)
@@ -1203,7 +864,7 @@ module timer_tiny (
       else
       begin
         if (timer_en)
-          prescale_cnt <= prescale_cnt + 15'd1;
+          prescale_cnt <= prescale_cnt + 11'd1;
 
         if (timer_en && !InterLock)
         begin
@@ -1702,15 +1363,688 @@ always @(*) begin
 end
 
 endmodule
-module is_different (
-    input  [15:0] in1,
-    input  [15:0] in2,
+module debug_serial_frontend_tiny
+(
+    input  wire        cpu_clk,
+    input  wire        rst_n,
 
-    output        different
-  );
-  assign different = (in1 != in2);
+    input  wire        dbg_clk,
+    input  wire        dbg_data_in,
+    output reg         dbg_data_out,
+    output reg         dbg_data_oe,
+
+    output reg         reg_wr,
+    output reg  [3:0]  reg_addr,
+    output reg  [15:0] reg_wdata,
+    input  wire [15:0] reg_rdata
+);
+
+  localparam CMD_PING  = 4'h0;
+  localparam CMD_READ  = 4'h1;
+  localparam CMD_WRITE = 4'h2;
+
+  localparam S_RX      = 2'd0;
+  localparam S_EXEC    = 2'd1;
+  localparam S_LOAD_TX = 2'd2;
+  localparam S_TX      = 2'd3;
+
+  reg [1:0]  state;
+  reg [23:0] rx_shift;
+  reg [4:0]  rx_count;
+  reg [15:0] tx_shift;
+  reg [4:0]  tx_count;
+
+  reg [3:0]  cmd_hold;
+  reg [3:0]  addr_hold;
+  reg [15:0] wdata_hold;
+
+  reg [1:0] dbg_clk_sync;
+  reg [1:0] dbg_data_sync;
+
+  wire dbg_clk_rise;
+  wire dbg_clk_fall;
+  wire [23:0] rx_next;
+  wire [15:0] tx_word;
+
+  assign dbg_clk_rise = (dbg_clk_sync == 2'b01);
+  assign dbg_clk_fall = (dbg_clk_sync == 2'b10);
+  assign rx_next      = {rx_shift[22:0], dbg_data_sync[1]};
+  assign tx_word      = (cmd_hold == CMD_PING)  ? 16'hDB12 :
+                        (cmd_hold == CMD_READ)  ? reg_rdata :
+                        (cmd_hold == CMD_WRITE) ? 16'hACCE :
+                                                  16'hEEEE;
+
+  always @(posedge cpu_clk or negedge rst_n)
+  begin
+    if (!rst_n)
+    begin
+      state        <= S_RX;
+      rx_shift     <= 24'h000000;
+      rx_count     <= 5'd0;
+      tx_shift     <= 16'h0000;
+      tx_count     <= 5'd0;
+      cmd_hold     <= 4'h0;
+      addr_hold    <= 4'h0;
+      wdata_hold   <= 16'h0000;
+      dbg_clk_sync <= 2'b00;
+      dbg_data_sync<= 2'b11;
+      dbg_data_out <= 1'b1;
+      dbg_data_oe  <= 1'b0;
+      reg_wr       <= 1'b0;
+      reg_addr     <= 4'h0;
+      reg_wdata    <= 16'h0000;
+    end
+    else
+    begin
+      dbg_clk_sync  <= {dbg_clk_sync[0], dbg_clk};
+      dbg_data_sync <= {dbg_data_sync[0], dbg_data_in};
+      reg_wr        <= 1'b0;
+
+      case (state)
+        S_RX:
+        begin
+          dbg_data_oe  <= 1'b0;
+          dbg_data_out <= 1'b1;
+
+          if (dbg_clk_rise)
+          begin
+            if (rx_count == 5'd23)
+            begin
+              cmd_hold   <= rx_next[23:20];
+              addr_hold  <= rx_next[19:16];
+              wdata_hold <= rx_next[15:0];
+              rx_count   <= 5'd0;
+              state      <= S_EXEC;
+            end
+            else
+            begin
+              rx_shift <= rx_next;
+              rx_count <= rx_count + 5'd1;
+            end
+          end
+        end
+
+        S_EXEC:
+        begin
+          reg_addr  <= addr_hold;
+          reg_wdata <= wdata_hold;
+          if (cmd_hold == CMD_WRITE)
+            reg_wr <= 1'b1;
+          state <= S_LOAD_TX;
+        end
+
+        S_LOAD_TX:
+        begin
+          tx_shift     <= tx_word;
+          tx_count     <= 5'd0;
+          dbg_data_oe  <= 1'b0;
+          dbg_data_out <= 1'b1;
+
+          if (dbg_clk_fall)
+          begin
+            dbg_data_oe  <= 1'b1;
+            dbg_data_out <= tx_word[15];
+            state        <= S_TX;
+          end
+        end
+
+        S_TX:
+        begin
+          if (dbg_clk_fall)
+          begin
+            if (tx_count == 5'd15)
+            begin
+              dbg_data_oe  <= 1'b0;
+              dbg_data_out <= 1'b1;
+              state        <= S_RX;
+            end
+            else
+            begin
+              tx_shift     <= {tx_shift[14:0], 1'b0};
+              dbg_data_out <= tx_shift[14];
+              tx_count     <= tx_count + 5'd1;
+            end
+          end
+        end
+
+        default:
+        begin
+          state        <= S_RX;
+          dbg_data_oe  <= 1'b0;
+          dbg_data_out <= 1'b1;
+        end
+      endcase
+    end
+  end
 
 endmodule
+
+module cpu_cycle_controller_tiny
+(
+    input  wire clk,
+    input  wire rst_n,
+
+    input  wire fetch_done,
+    input  wire data_done,
+
+    input  wire ld,
+    input  wire st,
+    input  wire flash_ld,
+
+    input  wire dbg_enable,
+    input  wire dbg_halt_req,
+    input  wire dbg_run_req,
+    input  wire dbg_step_req,
+    input  wire dbg_break_hit,
+    input  wire dbg_break_after_exec,
+
+    output wire fetch_req,
+    output wire execute_now_pulse,
+    output wire dbg_halted
+);
+
+  localparam S_REQ_FETCH  = 3'd0;
+  localparam S_WAIT_FETCH = 3'd1;
+  localparam S_EXECUTE    = 3'd2;
+  localparam S_WAIT_DATA  = 3'd3;
+  localparam S_HALTED     = 3'd4;
+
+  reg [2:0] state;
+  reg       halt_pending;
+  reg       step_active;
+
+  wire mem_op;
+  wire stop_after_exec;
+
+  assign mem_op           = ld | st | flash_ld;
+  assign fetch_req        = (state == S_REQ_FETCH);
+  assign execute_now_pulse= (state == S_EXECUTE);
+  assign dbg_halted       = (state == S_HALTED);
+  assign stop_after_exec  = dbg_enable & (halt_pending | step_active | dbg_break_after_exec);
+
+  always @(posedge clk or negedge rst_n)
+  begin
+    if (!rst_n)
+    begin
+      state        <= S_REQ_FETCH;
+      halt_pending <= 1'b0;
+      step_active  <= 1'b0;
+    end
+    else if (!dbg_enable)
+    begin
+      halt_pending <= 1'b0;
+      step_active  <= 1'b0;
+
+      case (state)
+        S_REQ_FETCH:  state <= S_WAIT_FETCH;
+        S_WAIT_FETCH: if (fetch_done) state <= S_EXECUTE;
+        S_EXECUTE:    state <= mem_op ? S_WAIT_DATA : S_REQ_FETCH;
+        S_WAIT_DATA:  if (data_done) state <= S_REQ_FETCH;
+        default:      state <= S_REQ_FETCH;
+      endcase
+    end
+    else
+    begin
+      if (dbg_halt_req)
+        halt_pending <= 1'b1;
+
+      case (state)
+        S_REQ_FETCH:
+        begin
+          if (dbg_halt_req)
+          begin
+            state        <= S_HALTED;
+            halt_pending <= 1'b0;
+            step_active  <= 1'b0;
+          end
+          else
+            state <= S_WAIT_FETCH;
+        end
+
+        S_WAIT_FETCH:
+        begin
+          if (fetch_done)
+          begin
+            if (dbg_break_hit | halt_pending)
+            begin
+              state        <= S_HALTED;
+              halt_pending <= 1'b0;
+              step_active  <= 1'b0;
+            end
+            else
+              state <= S_EXECUTE;
+          end
+        end
+
+        S_EXECUTE:
+        begin
+          if (mem_op)
+            state <= S_WAIT_DATA;
+          else if (stop_after_exec)
+          begin
+            state        <= S_HALTED;
+            halt_pending <= 1'b0;
+            step_active  <= 1'b0;
+          end
+          else
+            state <= S_REQ_FETCH;
+        end
+
+        S_WAIT_DATA:
+        begin
+          if (data_done)
+          begin
+            if (stop_after_exec)
+            begin
+              state        <= S_HALTED;
+              halt_pending <= 1'b0;
+              step_active  <= 1'b0;
+            end
+            else
+              state <= S_REQ_FETCH;
+          end
+        end
+
+        S_HALTED:
+        begin
+          halt_pending <= 1'b0;
+
+          if (dbg_run_req)
+          begin
+            state       <= S_REQ_FETCH;
+            step_active <= 1'b0;
+          end
+          else if (dbg_step_req)
+          begin
+            state       <= S_REQ_FETCH;
+            step_active <= 1'b1;
+          end
+        end
+
+        default:
+        begin
+          state        <= S_REQ_FETCH;
+          halt_pending <= 1'b0;
+          step_active  <= 1'b0;
+        end
+      endcase
+    end
+  end
+
+endmodule
+
+module memory_wait_controller_tiny
+(
+    input  wire        clk,
+    input  wire        rst_n,
+
+    input  wire        fetch_req,
+    input  wire        ld_req,
+    input  wire        st_req,
+    input  wire        flash_req,
+
+    input  wire [15:0] fetch_addr,
+    input  wire [15:0] data_addr,
+    input  wire [15:0] store_data,
+
+    output reg  [15:0] mem_rdata,
+    output reg         fetch_done,
+    output reg         data_done,
+    output reg         mem_stall,
+
+    output reg         spi_st,
+    output reg         spi_ld,
+    output reg  [15:0] spi_addr,
+    output reg  [15:0] spi_data_in,
+    output reg         spi_target,
+    input  wire [15:0] spi_data_out,
+    input  wire        spi_busy
+);
+
+  localparam OP_NONE  = 2'd0;
+  localparam OP_FETCH = 2'd1;
+  localparam OP_LOAD  = 2'd2;
+  localparam OP_STORE = 2'd3;
+
+  localparam S_IDLE           = 3'd0;
+  localparam S_START          = 3'd1;
+  localparam S_WAIT_BUSY_HIGH = 3'd2;
+  localparam S_WAIT_BUSY_LOW  = 3'd3;
+  localparam S_FINISH         = 3'd4;
+
+  reg [2:0] state;
+  reg [1:0] op;
+  reg [15:0] last_flash_addr;
+
+
+  always @(posedge clk or negedge rst_n)
+  begin
+    if (!rst_n)
+    begin
+      state              <= S_IDLE;
+      op                 <= OP_NONE;
+      mem_rdata          <= 16'h0000;
+      fetch_done         <= 1'b0;
+      data_done          <= 1'b0;
+      mem_stall          <= 1'b0;
+      spi_st             <= 1'b0;
+      spi_ld             <= 1'b0;
+      spi_addr           <= 16'h0000;
+      spi_data_in        <= 16'h0000;
+      spi_target         <= 1'b0;
+      last_flash_addr    <= 16'h0000;
+    end
+    else
+    begin
+      fetch_done <= 1'b0;
+      data_done  <= 1'b0;
+      spi_st     <= 1'b0;
+      spi_ld     <= 1'b0;
+
+      case (state)
+        S_IDLE:
+        begin
+          mem_stall <= 1'b0;
+          op        <= OP_NONE;
+
+          if (st_req)
+          begin
+            op          <= OP_STORE;
+            spi_target  <= 1'b1;
+            spi_addr    <= data_addr;
+            spi_data_in <= store_data;
+            mem_stall   <= 1'b1;
+            state       <= S_START;
+          end
+          else if (ld_req)
+          begin
+            op          <= OP_LOAD;
+            spi_target  <= 1'b1;
+            spi_addr    <= data_addr;
+            spi_data_in <= 16'h0000;
+            mem_stall   <= 1'b1;
+            state       <= S_START;
+          end
+          else if (fetch_req)
+          begin
+            op          <= OP_FETCH;
+            spi_target  <= 1'b0;
+            spi_addr    <= fetch_addr;
+            spi_data_in <= 16'h0000;
+            mem_stall   <= 1'b1;
+            state       <= S_START;
+          end
+          else if (flash_req)
+          begin
+            op          <= OP_LOAD;
+            spi_target  <= 1'b0;
+            spi_addr    <= data_addr;
+            spi_data_in <= 16'h0000;
+            mem_stall   <= 1'b1;
+            state       <= S_START;
+          end
+        end
+
+        S_START:
+        begin
+          if (op == OP_STORE)
+            spi_st <= 1'b1;
+          else
+          begin
+            spi_ld <= 1'b1;
+            
+          end
+          state <= S_WAIT_BUSY_HIGH;
+        end
+
+        S_WAIT_BUSY_HIGH:
+          if (spi_busy)
+            state <= S_WAIT_BUSY_LOW;
+
+        S_WAIT_BUSY_LOW:
+        begin
+          if (!spi_busy)
+          begin
+            if (op != OP_STORE)
+              mem_rdata <= spi_data_out;
+            state <= S_FINISH;
+          end
+        end
+
+        S_FINISH:
+        begin
+          mem_stall <= 1'b0;
+          if (op == OP_FETCH)
+          begin
+            fetch_done         <= 1'b1;
+            last_flash_addr    <= spi_addr;
+          end
+          else
+          begin
+            data_done          <= 1'b1;
+          end
+          state <= S_IDLE;
+        end
+
+        default:
+        begin
+          state              <= S_IDLE;
+        end
+      endcase
+    end
+  end
+
+endmodule
+
+module debug_core_tiny
+(
+    input  wire        clk,
+    input  wire        rst_n,
+
+    // Tiny register port
+    input  wire        reg_wr,
+    input  wire [3:0]  reg_addr,
+    input  wire [15:0] reg_wdata,
+    output reg  [15:0] reg_rdata,
+
+    // CPU status
+    input  wire        cpu_dbg_halted,
+    input  wire [2:0]  cpu_flags,
+    input  wire [15:0] cpu_pc,
+    input  wire [15:0] cpu_ir,
+
+    // Debug control outputs
+    output reg         dbg_enable,
+    output reg         dbg_halt_req,
+    output reg         dbg_run_req,
+    output reg         dbg_step_req,
+    output reg         static_break_enable,
+
+    // One dynamic breakpoint only
+    output reg  [15:0] bp0,
+    output reg         bp_enable
+);
+
+  localparam REG_ID      = 4'h0;
+  localparam REG_STATUS  = 4'h1;
+  localparam REG_CONTROL = 4'h2;
+  localparam REG_FLAGS   = 4'h3;
+  localparam REG_PC      = 4'h4;
+  localparam REG_IR      = 4'h5;
+  localparam REG_BP0     = 4'h8;
+  localparam REG_BPCTRL  = 4'h9;
+
+  always @(posedge clk or negedge rst_n)
+  begin
+    if (!rst_n)
+    begin
+      dbg_enable           <= 1'b0;
+      dbg_halt_req         <= 1'b0;
+      dbg_run_req          <= 1'b0;
+      dbg_step_req         <= 1'b0;
+      static_break_enable  <= 1'b0;
+      bp0                  <= 16'h0000;
+      bp_enable            <= 1'b0;
+    end
+    else
+    begin
+      dbg_run_req  <= 1'b0;
+      dbg_step_req <= 1'b0;
+
+      if (cpu_dbg_halted)
+        dbg_halt_req <= 1'b0;
+
+      if (reg_wr)
+      begin
+        case (reg_addr)
+          REG_CONTROL:
+          begin
+            dbg_enable          <= reg_wdata[0];
+            static_break_enable <= reg_wdata[5];
+
+            if (!reg_wdata[0])
+              dbg_halt_req <= 1'b0;
+
+            if (reg_wdata[1] && reg_wdata[0])
+              dbg_halt_req <= 1'b1;
+
+            if (reg_wdata[2] && reg_wdata[0])
+            begin
+              dbg_run_req  <= 1'b1;
+              dbg_halt_req <= 1'b0;
+            end
+
+            if (reg_wdata[3] && reg_wdata[0])
+            begin
+              dbg_step_req <= 1'b1;
+              dbg_halt_req <= 1'b0;
+            end
+          end
+
+          REG_BP0:
+            bp0 <= reg_wdata;
+
+          REG_BPCTRL:
+            bp_enable <= reg_wdata[0];
+
+          default:
+          begin
+          end
+        endcase
+      end
+    end
+  end
+
+  always @(*)
+  begin
+    case (reg_addr)
+      REG_ID:
+        reg_rdata = 16'hDB11;
+
+      REG_STATUS:
+        reg_rdata = {
+          12'h000,
+          bp_enable,
+          static_break_enable,
+          dbg_enable,
+          cpu_dbg_halted
+        };
+
+      REG_CONTROL:
+        reg_rdata = {
+          10'h000,
+          static_break_enable,
+          1'b0,
+          1'b0,
+          1'b0,
+          dbg_halt_req,
+          dbg_enable
+        };
+
+      REG_FLAGS:
+        reg_rdata = {13'h0000, cpu_flags};
+
+      REG_PC:
+        reg_rdata = cpu_pc;
+
+      REG_IR:
+        reg_rdata = cpu_ir;
+
+      REG_BP0:
+        reg_rdata = bp0;
+
+      REG_BPCTRL:
+        reg_rdata = {15'h0000, bp_enable};
+
+      default:
+        reg_rdata = 16'h0000;
+    endcase
+  end
+
+endmodule
+
+module breakpoint_logic_tiny
+(
+    input  wire        clk,
+    input  wire        rst_n,
+
+    input  wire        dbg_enable,
+    input  wire        dbg_halted,
+    input  wire        dbg_run_req,
+    input  wire        dbg_step_req,
+    input  wire        execute_now_pulse,
+
+    input  wire [15:0] pc,
+    input  wire [15:0] bp0,
+    input  wire        bp_enable,
+
+    input  wire        instr_is_brk,
+    input  wire        static_break_enable,
+
+    output wire        dbg_break_hit,
+    output wire        dbg_break_after_exec
+);
+
+    reg bp_resume_mask;
+    wire resume_cmd;
+    wire bp_raw_hit;
+
+    assign resume_cmd = dbg_run_req | dbg_step_req;
+    assign bp_raw_hit = dbg_enable & bp_enable & (pc == bp0);
+
+    assign dbg_break_hit = bp_raw_hit & ~bp_resume_mask;
+    assign dbg_break_after_exec = dbg_enable & static_break_enable & instr_is_brk;
+
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+            bp_resume_mask <= 1'b0;
+        else if (execute_now_pulse)
+            bp_resume_mask <= 1'b0;
+        else if (dbg_halted & resume_cmd)
+            bp_resume_mask <= 1'b1;
+    end
+
+endmodule
+
+module DIG_Add
+#(
+    parameter Bits = 1
+)
+(
+    input [(Bits-1):0] a,
+    input [(Bits-1):0] b,
+    input c_i,
+    output [(Bits - 1):0] s,
+    output c_o
+);
+   wire [Bits:0] temp;
+
+   assign temp = a + b + c_i;
+   assign s = temp [(Bits-1):0];
+   assign c_o = temp[Bits];
+endmodule
+
 
 
 module singExtend (
@@ -1737,6 +2071,26 @@ module singExtend (
   assign \8SD [14] = s0;
   assign \8SD [15] = s0;
 endmodule
+
+module Mux_2x1_NBits #(
+    parameter Bits = 2
+)
+(
+    input [0:0] sel,
+    input [(Bits - 1):0] in_0,
+    input [(Bits - 1):0] in_1,
+    output reg [(Bits - 1):0] out
+);
+    always @ (*) begin
+        case (sel)
+            1'h0: out = in_0;
+            1'h1: out = in_1;
+            default:
+                out = 'h0;
+        endcase
+    end
+endmodule
+
 module opcode_microcode_rom(
     input  [6:0] opcode,
     output muxb0,
@@ -1763,7 +2117,8 @@ module opcode_microcode_rom(
     output ioR,
     output stPC,
     output Reti,
-    output flash_req
+    output flash_req,
+    output Brk
 );
 
 reg [24:0] ctrl;
@@ -1793,86 +2148,88 @@ assign {
     ioR,
     stPC,
     Reti,
-    flash_req
+    flash_req,
+    Brk
 } = ctrl;
 
 always @(*) begin
     case (opcode)
-        7'b0000000: ctrl = 25'b0000_0000_0000_0000_0000_00000;//8'hx00:
-        7'b0000001: ctrl = 25'b0000_0000_0100_0000_1000_00000;//8'hx01:
-        7'b0000010: ctrl = 25'b0000_0000_1110_0000_0000_00000;//8'hx02:
-        7'b0000011: ctrl = 25'b0001_0000_1110_0000_0000_00000;//8'hx03:
-        7'b0000100: ctrl = 25'b0000_0001_0110_0000_0000_00000;//8'hx04:
-        7'b0000101: ctrl = 25'b0001_0001_0110_0000_0000_00000;//8'hx05:
-        7'b0000110: ctrl = 25'b0000_0001_1110_0000_0000_00000;//8'hx06:
-        7'b0000111: ctrl = 25'b0000_0010_0110_0000_0000_00000;//8'hx07:
-        7'b0001000: ctrl = 25'b0000_0010_1110_0000_0000_00000;//8'hx08:
-        7'b0001001: ctrl = 25'b0100_0000_0101_0000_0000_00000;//8'hx09:
-        7'b0001010: ctrl = 25'b1010_0000_0100_0000_0000_00000;//8'hx0A:
-        7'b0001011: ctrl = 25'b0100_0000_1111_0000_0000_00000;//8'hx0B:
-        7'b0001100: ctrl = 25'b1010_0000_1110_0000_0000_00000;//8'hx0C:
-        7'b0001101: ctrl = 25'b0101_0000_1111_0000_0000_00000;//8'hx0D:
-        7'b0001110: ctrl = 25'b1011_0000_1110_0000_0000_00000;//8'hx0E:
-        7'b0001111: ctrl = 25'b0100_0001_0111_0000_0000_00000;//8'hx0F:
-        7'b0010000: ctrl = 25'b1010_0001_0110_0000_0000_00000;//8'hx10:
-        7'b0010001: ctrl = 25'b0101_0001_0111_0000_0000_00000;//8'hx11:
-        7'b0010010: ctrl = 25'b1011_0001_0110_0000_0000_00000;//8'hx12:
-        7'b0010011: ctrl = 25'b0000_0011_1100_0000_0000_00000;//8'hx13:
-        7'b0010100: ctrl = 25'b0100_0001_1111_0000_0000_00000;//8'hx14:
-        7'b0010101: ctrl = 25'b1010_0001_1110_0000_0000_00000;//8'hx15:
-        7'b0010110: ctrl = 25'b0100_0010_0111_0000_0000_00000;//8'hx16:
-        7'b0010111: ctrl = 25'b1010_0010_0110_0000_0000_00000;//8'hx17:
-        7'b0011000: ctrl = 25'b0100_0010_1111_0000_0000_00000;//8'hx18:
-        7'b0011001: ctrl = 25'b1010_0010_1110_0000_0000_00000;//8'hx19:
-        7'b0011010: ctrl = 25'b0000_0011_0100_0000_0000_00000;//8'hx1A:
+        7'b0000000: ctrl = 26'b0000_0000_0000_0000_0000_00000_0;//8'hx00:
+        7'b0000001: ctrl = 26'b0000_0000_0100_0000_1000_00000_0;//8'hx01:
+        7'b0000010: ctrl = 26'b0000_0000_1110_0000_0000_00000_0;//8'hx02:
+        7'b0000011: ctrl = 26'b0001_0000_1110_0000_0000_00000_0;//8'hx03:
+        7'b0000100: ctrl = 26'b0000_0001_0110_0000_0000_00000_0;//8'hx04:
+        7'b0000101: ctrl = 26'b0001_0001_0110_0000_0000_00000_0;//8'hx05:
+        7'b0000110: ctrl = 26'b0000_0001_1110_0000_0000_00000_0;//8'hx06:
+        7'b0000111: ctrl = 26'b0000_0010_0110_0000_0000_00000_0;//8'hx07:
+        7'b0001000: ctrl = 26'b0000_0010_1110_0000_0000_00000_0;//8'hx08:
+        7'b0001001: ctrl = 26'b0100_0000_0101_0000_0000_00000_0;//8'hx09:
+        7'b0001010: ctrl = 26'b1010_0000_0100_0000_0000_00000_0;//8'hx0A:
+        7'b0001011: ctrl = 26'b0100_0000_1111_0000_0000_00000_0;//8'hx0B:
+        7'b0001100: ctrl = 26'b1010_0000_1110_0000_0000_00000_0;//8'hx0C:
+        7'b0001101: ctrl = 26'b0101_0000_1111_0000_0000_00000_0;//8'hx0D:
+        7'b0001110: ctrl = 26'b1011_0000_1110_0000_0000_00000_0;//8'hx0E:
+        7'b0001111: ctrl = 26'b0100_0001_0111_0000_0000_00000_0;//8'hx0F:
+        7'b0010000: ctrl = 26'b1010_0001_0110_0000_0000_00000_0;//8'hx10:
+        7'b0010001: ctrl = 26'b0101_0001_0111_0000_0000_00000_0;//8'hx11:
+        7'b0010010: ctrl = 26'b1011_0001_0110_0000_0000_00000_0;//8'hx12:
+        7'b0010011: ctrl = 26'b0000_0011_1100_0000_0000_00000_0;//8'hx13:
+        7'b0010100: ctrl = 26'b0100_0001_1111_0000_0000_00000_0;//8'hx14:
+        7'b0010101: ctrl = 26'b1010_0001_1110_0000_0000_00000_0;//8'hx15:
+        7'b0010110: ctrl = 26'b0100_0010_0111_0000_0000_00000_0;//8'hx16:
+        7'b0010111: ctrl = 26'b1010_0010_0110_0000_0000_00000_0;//8'hx17:
+        7'b0011000: ctrl = 26'b0100_0010_1111_0000_0000_00000_0;//8'hx18:
+        7'b0011001: ctrl = 26'b1010_0010_1110_0000_0000_00000_0;//8'hx19:
+        7'b0011010: ctrl = 26'b0000_0011_0100_0000_0000_00000_0;//8'hx1A:
         //17'b0011011:ctrl =58'b0000_0110_1110_0000_0000_00000;//8'hx1B:
         //17'b0011100:ctrl =58'b0100_0110_1111_0000_0000_00000;//8'hx1C:
         //17'b0011101:ctrl =58'b1010_0110_1110_0000_0000_00000;//8'hx1D:
-        7'b0011110: ctrl = 25'b0000_0001_0010_0000_0000_00000;//8'hx1E:
-        7'b0011111: ctrl = 25'b0001_0001_0010_0000_0000_00000;//8'hx1F:
-        7'b0100000: ctrl = 25'b0100_0001_0011_0000_0000_00000;//8'hx20:
-        7'b0100001: ctrl = 25'b1010_0001_0010_0000_0000_00000;//8'hx21:
-        7'b0100010: ctrl = 25'b0101_0001_0011_0000_0000_00000;//8'hx22:
-        7'b0100011: ctrl = 25'b1011_0001_0010_0000_0000_00000;//8'hx23:
-        7'b0100100: ctrl = 25'b0000_0100_0110_0000_0000_00000;//8'hx24:
-        7'b0100101: ctrl = 25'b0000_0100_1110_0000_0000_00000;//8'hx25:
-        7'b0100110: ctrl = 25'b0001_0100_0110_0000_0000_00000;//8'hx26:
-        7'b0100111: ctrl = 25'b0001_0100_1110_0000_0000_00000;//8'hx27:
-        7'b0101000: ctrl = 25'b0000_0101_0110_0000_0000_00000;//8'hx28:
-        7'b0101001: ctrl = 25'b0000_0101_1100_0000_0000_00000;//8'hx29:
-        7'b0101010: ctrl = 25'b0000_0110_0100_0000_0000_00000;//8'hx2A:
-        7'b0101011: ctrl = 25'b0110_0000_1000_0000_0010_00000;//8'hx2B:
-        7'b0101100: ctrl = 25'b0110_0000_1100_0000_1100_00000;//8'hx2C:
-        7'b0101101: ctrl = 25'b0100_0000_0001_1000_0010_00000;//8'hx2D:
-        7'b0101110: ctrl = 25'b1110_0000_0000_0000_0010_00000;//8'hx2E:
-        7'b0101111: ctrl = 25'b0100_0000_0101_0000_0100_00000;//8'hx2F:
-        7'b0110000: ctrl = 25'b1010_0000_0100_0000_0100_00000;//8'hx30:
-        7'b0110001: ctrl = 25'b0100_0000_1000_0000_0010_00000;//8'hx31:
-        7'b0110010: ctrl = 25'b0100_0000_1100_0000_1100_00000;//8'hx32:
-        //7'b0110011: ctrl = 25'b0010_0000_0100_0000_0000_00000;//8'hx33:
-        7'b0110100: ctrl = 25'b0100_0000_0001_0001_0000_00000;//8'hx34:
-        7'b0110101: ctrl = 25'b0100_0000_0001_0010_0000_00000;//8'hx35:
-        7'b0110110: ctrl = 25'b0100_0000_0001_0011_0000_00000;//8'hx36:
-        7'b0110111: ctrl = 25'b0100_0000_0001_0101_0000_00000;//8'hx37:
-        7'b0111000: ctrl = 25'b0100_0000_0001_0110_0000_00000;//8'hx38:
-        7'b0111001: ctrl = 25'b0100_0000_0001_0111_0000_00000;//8'hx39:
-        7'b0111010: ctrl = 25'b0100_0000_0101_0000_0001_00100;//8'hx3A:
-        7'b0111011: ctrl = 25'b0000_0000_0000_0000_0001_00000;//8'hx3B:
-        7'b0111100: ctrl = 25'b0100_0000_0001_0000_0001_00000;//8'hx3C:
-        7'b0111101: ctrl = 25'b1100_0000_0000_0100_0000_00000;//8'hx3D:
-        7'b0111110: ctrl = 25'b0100_0000_0001_1000_0000_10000;//8'hx3E:
-        7'b0111111: ctrl = 25'b1110_0000_0000_0000_0000_10000;//8'hx3F:
-        7'b1000000: ctrl = 25'b0110_0000_1000_0000_0000_10000;//8'hx40:
-        7'b1000001: ctrl = 25'b0100_0000_0101_0000_1000_01000;//8'hx41:
-        7'b1000010: ctrl = 25'b1010_0000_0100_0000_1000_01000;//8'hx42:
-        7'b1000011: ctrl = 25'b0110_0000_1100_0000_1000_01000;//8'hx43:
-        7'b1000100: ctrl = 25'b0000_0000_0000_0000_0001_00010;//8'hx44:
-        7'b1000101: ctrl = 25'b0110_0000_1100_0000_1000_00001;//8'hx44:
-        7'b1000110: ctrl = 25'b0100_0000_0101_0000_0000_00001;//8'hx44:
-        7'b1000111: ctrl = 25'b1010_0000_0100_0000_0000_00001;//8'hx44:
-        7'b1001000: ctrl = 25'b0100_0000_1100_0000_1000_00001;//8'hx44:
+        7'b0011110: ctrl = 26'b0000_0001_0010_0000_0000_00000_0;//8'hx1E:
+        7'b0011111: ctrl = 26'b0001_0001_0010_0000_0000_00000_0;//8'hx1F:
+        7'b0100000: ctrl = 26'b0100_0001_0011_0000_0000_00000_0;//8'hx20:
+        7'b0100001: ctrl = 26'b1010_0001_0010_0000_0000_00000_0;//8'hx21:
+        7'b0100010: ctrl = 26'b0101_0001_0011_0000_0000_00000_0;//8'hx22:
+        7'b0100011: ctrl = 26'b1011_0001_0010_0000_0000_00000_0;//8'hx23:
+        7'b0100100: ctrl = 26'b0000_0100_0110_0000_0000_00000_0;//8'hx24:
+        7'b0100101: ctrl = 26'b0000_0100_1110_0000_0000_00000_0;//8'hx25:
+        7'b0100110: ctrl = 26'b0001_0100_0110_0000_0000_00000_0;//8'hx26:
+        7'b0100111: ctrl = 26'b0001_0100_1110_0000_0000_00000_0;//8'hx27:
+        7'b0101000: ctrl = 26'b0000_0101_0110_0000_0000_00000_0;//8'hx28:
+        7'b0101001: ctrl = 26'b0000_0101_1100_0000_0000_00000_0;//8'hx29:
+        7'b0101010: ctrl = 26'b0000_0110_0100_0000_0000_00000_0;//8'hx2A:
+        7'b0101011: ctrl = 26'b0110_0000_1000_0000_0010_00000_0;//8'hx2B:
+        7'b0101100: ctrl = 26'b0110_0000_1100_0000_1100_00000_0;//8'hx2C:
+        7'b0101101: ctrl = 26'b0100_0000_0001_1000_0010_00000_0;//8'hx2D:
+        7'b0101110: ctrl = 26'b1110_0000_0000_0000_0010_00000_0;//8'hx2E:
+        7'b0101111: ctrl = 26'b0100_0000_0101_0000_0100_00000_0;//8'hx2F:
+        7'b0110000: ctrl = 26'b1010_0000_0100_0000_0100_00000_0;//8'hx30:
+        7'b0110001: ctrl = 26'b0100_0000_1000_0000_0010_00000_0;//8'hx31:
+        7'b0110010: ctrl = 26'b0100_0000_1100_0000_1100_00000_0;//8'hx32:
+        //7'b0110011: ctrl = 26'b0010_0000_0100_0000_0000_000_000;//8'hx33:
+        7'b0110100: ctrl = 26'b0100_0000_0001_0001_0000_00000_0;//8'hx34:
+        7'b0110101: ctrl = 26'b0100_0000_0001_0010_0000_00000_0;//8'hx35:
+        7'b0110110: ctrl = 26'b0100_0000_0001_0011_0000_00000_0;//8'hx36:
+        7'b0110111: ctrl = 26'b0100_0000_0001_0101_0000_00000_0;//8'hx37:
+        7'b0111000: ctrl = 26'b0100_0000_0001_0110_0000_00000_0;//8'hx38:
+        7'b0111001: ctrl = 26'b0100_0000_0001_0111_0000_00000_0;//8'hx39:
+        7'b0111010: ctrl = 26'b0100_0000_0101_0000_0001_00100_0;//8'hx3A:
+        7'b0111011: ctrl = 26'b0000_0000_0000_0000_0001_00000_0;//8'hx3B:
+        7'b0111100: ctrl = 26'b0100_0000_0001_0000_0001_00000_0;//8'hx3C:
+        7'b0111101: ctrl = 26'b1100_0000_0000_0100_0000_00000_0;//8'hx3D:
+        7'b0111110: ctrl = 26'b0100_0000_0001_1000_0000_10000_0;//8'hx3E:
+        7'b0111111: ctrl = 26'b1110_0000_0000_0000_0000_10000_0;//8'hx3F:
+        7'b1000000: ctrl = 26'b0110_0000_1000_0000_0000_10000_0;//8'hx40:
+        7'b1000001: ctrl = 26'b0100_0000_0101_0000_1000_01000_0;//8'hx41:
+        7'b1000010: ctrl = 26'b1010_0000_0100_0000_1000_01000_0;//8'hx42:
+        7'b1000011: ctrl = 26'b0110_0000_1100_0000_1000_01000_0;//8'hx43:
+        7'b1000100: ctrl = 26'b0000_0000_0000_0000_0001_00010_0;//8'hx44:
+        7'b1000101: ctrl = 26'b0110_0000_1100_0000_1000_00001_0;//8'hx45:
+        7'b1000110: ctrl = 26'b0100_0000_0101_0000_0000_00001_0;//8'hx46:
+        7'b1000111: ctrl = 26'b1010_0000_0100_0000_0000_00001_0;//8'hx47:
+        7'b1001000: ctrl = 26'b0100_0000_1100_0000_1000_00001_0;//8'hx48:
+        7'b1001000: ctrl = 26'b0000_0000_0000_0000_0000_00000_1;//8'hx49:
 
-        default:    ctrl = 25'b0000_0000_0000_0000_0000_00000;
+        default:    ctrl = 26'b0000_0000_0000_0000_0000_00000_0;
     endcase
 end
 
@@ -1905,25 +2262,6 @@ module DIG_Neg #(
 );
     assign out = -in;
 endmodule
-
-module DIG_Add
-#(
-    parameter Bits = 1
-)
-(
-    input [(Bits-1):0] a,
-    input [(Bits-1):0] b,
-    input c_i,
-    output [(Bits - 1):0] s,
-    output c_o
-);
-   wire [Bits:0] temp;
-
-   assign temp = a + b + c_i;
-   assign s = temp [(Bits-1):0];
-   assign c_o = temp[Bits];
-endmodule
-
 
 
 module DIG_Sub #(
@@ -2247,29 +2585,31 @@ module tt_um_remedy_cpu (
   wire [15:0] s4;
   wire [15:0] s5;
   wire [15:0] s6;
-  wire [15:0] s7;
+  wire [15:0] inst_reg;
+  wire [3:0] s7;
   wire [3:0] s8;
-  wire [3:0] s9;
   wire [7:0] OPcode;
-  wire [1:0] s10;
-  wire [15:0] s11;
+  wire [1:0] s9;
+  wire [15:0] s10;
   wire [15:0] mem_out;
   wire [15:0] iow_Din;
+  wire [15:0] s11;
   wire [15:0] s12;
-  wire [15:0] s13;
-  wire [1:0] s14;
+  wire [1:0] s13;
+  wire s14;
   wire s15;
   wire s16;
   wire s17;
-  wire s18;
   wire [2:0] br;
-  wire [7:0] s19;
+  wire [7:0] s18;
   wire imm;
   wire [1:0] iem;
-  wire s20;
+  wire s19;
   wire [15:0] inputReg;
+  wire [7:0] inputFromOutside;
+  wire [6:0] s20;
   wire [6:0] s21;
-  wire [6:0] s22;
+  wire s22;
   wire s23;
   wire s24;
   wire s25;
@@ -2278,228 +2618,203 @@ module tt_um_remedy_cpu (
   wire s28;
   wire s29;
   wire s30;
-  wire s31;
   wire [5:0] aluOp;
+  wire s31;
   wire s32;
   wire s33;
   wire s34;
   wire s35;
-  wire s36;
   wire intr;
   wire \execute-pulse ;
-  wire s37;
+  wire s36;
   wire Reti;
+  wire s37;
   wire s38;
   wire s39;
   wire s40;
-  wire s41;
-  wire [7:0] s42;
+  wire [7:0] s41;
   wire [7:0] uo_out_temp;
-  wire s43;
+  wire s42;
   wire sf;
+  wire s43;
   wire s44;
-  wire s45;
   wire pc_en;
+  wire s45;
   wire s46;
-  wire s47;
   wire [15:0] programAddr;
-  wire [15:0] s48;
-  wire s49;
-  wire [15:0] s50;
-  wire InterLock;
-  wire s51;
-  wire s52;
+  wire s47;
+  wire s48;
   wire stPC;
   wire [15:0] outR;
-  wire fetch_request_pulse;
-  wire s53;
-  wire s54;
-  wire s55;
-  wire [15:0] spi_data;
-  wire spi_busy_ram;
-  wire Fetch_done;
-  wire data_done;
-  wire s56;
   wire spi_st;
   wire spi_ld;
   wire [15:0] spi_addr;
   wire [15:0] spi_data_out;
-  wire spi_target;
   wire spi_miso;
+  wire [15:0] spi_data;
   wire spi_cs;
   wire spi_clock_ram;
+  wire spi_busy_ram;
   wire spi_mosi_ram;
-  wire ld;
-  wire st;
-  wire flash_req;
-  wire s57;
+  wire s49;
   wire WE;
-  wire s58;
-  wire s59;
-  wire s60;
+  wire ld;
+  wire data_done;
+  wire s50;
+  wire s51;
+  wire s52;
+  wire Fetch_done;
   wire abs;
-  wire s61;
-  wire s62;
-  wire s63;
-  wire s64;
+  wire s53;
+  wire s54;
+  wire s55;
+  wire s56;
   wire \sda-in ;
   wire \scl-in ;
-  wire s65;
+  wire dbg_data_in;
   wire spics_ram;
   wire spics_flash;
   wire sda_o;
   wire scl_o;
+  wire dbg_data_out;
   wire sda_oe;
   wire scl_oe;
-  wire [3:0] s66;
-  wire [3:0] s67;
+  wire dbg_data_oe;
+  wire [3:0] s57;
+  wire [2:0] s58;
   wire [15:0] intr_reg;
-  wire s68;
-  wire s69;
+  wire InterLock;
+  wire s59;
+  wire s60;
   wire i2c_inter;
-  wire [7:0] s70;
+  wire [7:0] s61;
   wire [15:0] rngdat0;
   wire [15:0] timerdat1;
-  wire [8:0] s71;
+  wire [8:0] s62;
   wire [15:0] timerdat2;
-  wire [2:0] s72;
+  wire [2:0] s63;
   wire [15:0] i2cDat;
-  wire [4:0] s73;
+  wire [4:0] s64;
+  wire s65;
+  wire [3:0] s66;
+  wire st;
+  wire flash_req;
+  wire Break;
+  wire spi_target;
+  wire s67;
+  wire s68;
+  wire s69;
+  wire s70;
+  wire s71;
+  wire s72;
+  wire s73;
   wire s74;
-  wire [3:0] s75;
-  wire s76;
-  wire s77;
+  wire [2:0] flag_out;
+  wire dbg_clk;
+  wire [15:0] reg_rdata;
+  wire s75;
+  wire [3:0] s76;
+  wire [15:0] s77;
   wire s78;
   wire s79;
   wire s80;
   wire s81;
+  wire dbg_en;
+  wire halt_req;
+  wire run_req;
+  wire step_req;
   wire s82;
   wire s83;
-  assign inputReg[0] = ui_in[0];
-  assign inputReg[1] = ui_in[1];
-  assign inputReg[2] = ui_in[2];
-  assign inputReg[3] = ui_in[3];
-  assign inputReg[4] = ui_in[4];
-  assign inputReg[5] = ui_in[5];
-  assign inputReg[6] = ui_in[6];
-  assign inputReg[7] = ui_in[7];
-  assign inputReg[15:8] = 8'b0;
+  wire fetch_request_pulse;
+  wire dbg_halted;
+  wire ststic_break_en;
+  wire [15:0] bp0;
+  wire bp_en;
   Mux_2x1 Mux_2x1_i0 (
     .sel( ena ),
     .in_0( 1'b1 ),
     .in_1( clk ),
-    .out( s20 )
+    .out( s19 )
   );
+  assign inputFromOutside[6:0] = ui_in[6:0];
+  assign inputFromOutside[7] = 1'b0;
   assign spi_miso = uio_in[0];
-  assign s61 = uio_in[1];
-  assign s62 = uio_in[2];
-  assign s63 = uio_in[3];
-  assign s64 = uio_in[4];
+  assign s53 = uio_in[1];
+  assign s54 = uio_in[2];
+  assign s55 = uio_in[3];
+  assign s56 = uio_in[4];
   assign \sda-in  = uio_in[5];
   assign \scl-in  = uio_in[6];
-  assign s65 = uio_in[7];
+  assign dbg_data_in = uio_in[7];
+  assign dbg_clk = ui_in[7];
+  assign inputReg[0] = inputFromOutside[0];
+  assign inputReg[1] = inputFromOutside[1];
+  assign inputReg[2] = inputFromOutside[2];
+  assign inputReg[3] = inputFromOutside[3];
+  assign inputReg[4] = inputFromOutside[4];
+  assign inputReg[5] = inputFromOutside[5];
+  assign inputReg[6] = inputFromOutside[6];
+  assign inputReg[7] = inputFromOutside[7];
+  assign inputReg[15:8] = 8'b0;
   ImReg ImReg_i1 (
     .en( imm ),
     .iem( iem ),
-    .C( s20 ),
-    .inst( s7 ),
+    .C( s19 ),
+    .inst( inst_reg ),
     .imm( ImmReg )
   );
   // NegR
   register_1bit register_1bit_i2 (
-    .D( s43 ),
-    .C( s20 ),
-    .en( sf ),
-    .rst( rst_n ),
-    .Q( s17 )
-  );
-  // ZeroR
-  register_1bit register_1bit_i3 (
-    .D( s44 ),
-    .C( s20 ),
+    .D( s42 ),
+    .C( s19 ),
     .en( sf ),
     .rst( rst_n ),
     .Q( s16 )
   );
-  // CarryR
-  register_1bit register_1bit_i4 (
-    .D( s45 ),
-    .C( s20 ),
+  // ZeroR
+  register_1bit register_1bit_i3 (
+    .D( s43 ),
+    .C( s19 ),
     .en( sf ),
     .rst( rst_n ),
     .Q( s15 )
   );
+  // CarryR
+  register_1bit register_1bit_i4 (
+    .D( s44 ),
+    .C( s19 ),
+    .en( sf ),
+    .rst( rst_n ),
+    .Q( s14 )
+  );
   // outputReg
   register_8bit register_8bit_i5 (
-    .D( s42 ),
-    .C( s20 ),
-    .en( s41 ),
+    .D( s41 ),
+    .C( s19 ),
+    .en( s40 ),
     .rst( rst_n ),
     .Q( uo_out_temp )
   );
   // programCounter
   programCounter programCounter_i6 (
-    .AluIn( s11 ),
-    .clk( s20 ),
+    .AluIn( s10 ),
+    .clk( s19 ),
     .rst_n( rst_n ),
     .pc_en( pc_en ),
-    .absJmp( s46 ),
-    .intr( s37 ),
-    .reti( s38 ),
-    .relJmp( s47 ),
-    .Nextpc( s12 ),
+    .absJmp( s45 ),
+    .intr( s36 ),
+    .reti( s37 ),
+    .relJmp( s46 ),
     .PC( programAddr )
   );
-  DIG_Register_BUS #(
-    .Bits(16)
-  )
-  DIG_Register_BUS_i7 (
-    .D( s48 ),
-    .C( s20 ),
-    .en( s49 ),
-    .Q( s50 )
-  );
-  Mux_2x1_NBits #(
-    .Bits(16)
-  )
-  Mux_2x1_NBits_i8 (
-    .sel( InterLock ),
-    .in_0( inputReg ),
-    .in_1( s50 ),
-    .out( s48 )
-  );
-  // memory_wait_controller
-  memory_wait_controller memory_wait_controller_i9 (
-    .clk( s20 ),
-    .rst_n( rst_n ),
-    .fetch_req( fetch_request_pulse ),
-    .ld_req( s53 ),
-    .st_req( s54 ),
-    .flash_req( s55 ),
-    .fetch_addr( programAddr ),
-    .data_addr( s11 ),
-    .store_data( s1 ),
-    .spi_data_out( spi_data ),
-    .spi_busy( spi_busy_ram ),
-    .mem_rdata( mem_out ),
-    .fetch_done( Fetch_done ),
-    .data_done( data_done ),
-    .mem_stall( s56 ),
-    .spi_st( spi_st ),
-    .spi_ld( spi_ld ),
-    .spi_addr( spi_addr ),
-    .spi_data_in( spi_data_out ),
-    .spi_target( spi_target )
-  );
   // spi_memory_interface
-  spi_memory_interface spi_memory_interface_i10 (
-    .clk( s20 ),
+  spi_memory_interface spi_memory_interface_i7 (
+    .clk( s19 ),
     .spi_rst_n( rst_n ),
     .st( spi_st ),
     .ld( spi_ld ),
     .addr( spi_addr ),
     .data_in( spi_data_out ),
-    .is_continous( 1'b0 ),
     .spi_miso( spi_miso ),
     .data_out( spi_data ),
     .spi_cs( spi_cs ),
@@ -2507,35 +2822,23 @@ module tt_um_remedy_cpu (
     .busy( spi_busy_ram ),
     .spi_mosi( spi_mosi_ram )
   );
-  // cpu_cycle_controller
-  cpu_cycle_controller cpu_cycle_controller_i11 (
-    .clk( s20 ),
-    .rst_n( rst_n ),
-    .fetch_done( Fetch_done ),
-    .data_done( data_done ),
-    .ld( ld ),
-    .st( st ),
-    .flash_ld( flash_req ),
-    .fetch_req( fetch_request_pulse ),
-    .execute_now_pulse( \execute-pulse  )
-  );
   DIG_Register_BUS #(
     .Bits(16)
   )
-  DIG_Register_BUS_i12 (
+  DIG_Register_BUS_i8 (
     .D( mem_out ),
-    .C( s20 ),
+    .C( s19 ),
     .en( Fetch_done ),
-    .Q( s7 )
+    .Q( inst_reg )
   );
   // interrupt_controller_small
-  interrupt_controller_small interrupt_controller_small_i13 (
-    .dOut( s66 ),
-    .Addr( s11 ),
-    .ioW( s40 ),
-    .C( s20 ),
+  interrupt_controller_small interrupt_controller_small_i9 (
+    .dOut( s57 ),
+    .Addr( s10 ),
+    .ioW( s39 ),
+    .C( s19 ),
     .rst_n( rst_n ),
-    .irq_in( s67 ),
+    .irq_in( s58 ),
     .imm( imm ),
     .reti( Reti ),
     .pc_en( pc_en ),
@@ -2547,21 +2850,21 @@ module tt_um_remedy_cpu (
     .irq_lock( InterLock )
   );
   // lfsr_RandomNumberGen
-  lfsr_RandomNumberGen lfsr_RandomNumberGen_i14 (
-    .adrrIn( s11 ),
-    .dataIn( s70 ),
-    .ioW( s40 ),
-    .clk( s20 ),
+  lfsr_RandomNumberGen lfsr_RandomNumberGen_i10 (
+    .adrrIn( s10 ),
+    .dataIn( s61 ),
+    .ioW( s39 ),
+    .clk( s19 ),
     .SeedAdr( 16'b1011 ),
     .RngAdr( 16'b1100 ),
     .Out( rngdat0 )
   );
   // timer
-  timer timer_i15 (
+  timer timer_i11 (
     .dOut( s1 ),
-    .Addr( s11 ),
-    .ioW( s40 ),
-    .C( s20 ),
+    .Addr( s10 ),
+    .ioW( s39 ),
+    .C( s19 ),
     .InterLock( InterLock ),
     .timerConfigAddr( 16'b10 ),
     .timerTargetAddr( 16'b11 ),
@@ -2570,14 +2873,14 @@ module tt_um_remedy_cpu (
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat1 ),
-    .timer_interrupt( s68 )
+    .timer_interrupt( s59 )
   );
   // timer_tiny
-  timer_tiny timer_tiny_i16 (
-    .dOut( s71 ),
-    .Addr( s11 ),
-    .ioW( s40 ),
-    .C( s20 ),
+  timer_tiny timer_tiny_i12 (
+    .dOut( s62 ),
+    .Addr( s10 ),
+    .ioW( s39 ),
+    .C( s19 ),
     .InterLock( InterLock ),
     .timerConfigAddr( 16'b110 ),
     .timerTargetAddr( 16'b111 ),
@@ -2586,23 +2889,23 @@ module tt_um_remedy_cpu (
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat2 ),
-    .timer_interrupt( s69 )
+    .timer_interrupt( s60 )
   );
   // RegisterBlock
-  RegisterBlock RegisterBlock_i17 (
-    .DataIn( s13 ),
+  RegisterBlock RegisterBlock_i13 (
+    .DataIn( s12 ),
     .WE( WE ),
-    .clk( s20 ),
-    .src( s8 ),
-    .Dest( s9 ),
+    .clk( s19 ),
+    .src( s7 ),
+    .Dest( s8 ),
     .RDest( s0 ),
     .Rsrc( s1 )
   );
   Mux_8x1_NBits #(
     .Bits(16)
   )
-  Mux_8x1_NBits_i18 (
-    .sel( s72 ),
+  Mux_8x1_NBits_i14 (
+    .sel( s63 ),
     .in_0( inputReg ),
     .in_1( outR ),
     .in_2( timerdat1 ),
@@ -2614,11 +2917,11 @@ module tt_um_remedy_cpu (
     .out( iow_Din )
   );
   // i2c_master_ctrl
-  i2c_master_ctrl i2c_master_ctrl_i19 (
-    .clk( s20 ),
+  i2c_master_ctrl i2c_master_ctrl_i15 (
+    .clk( s19 ),
     .rst_n( rst_n ),
-    .wr_en( s74 ),
-    .reg_addr( s75 ),
+    .wr_en( s65 ),
+    .reg_addr( s66 ),
     .cpu_din( s1 ),
     .sda_in( \sda-in  ),
     .scl_in( \scl-in  ),
@@ -2629,10 +2932,101 @@ module tt_um_remedy_cpu (
     .scl_oe( scl_oe ),
     .interrupt( i2c_inter )
   );
-  assign s37 = (intr & \execute-pulse );
+  // debug_serial_frontend_tiny
+  debug_serial_frontend_tiny debug_serial_frontend_tiny_i16 (
+    .cpu_clk( s19 ),
+    .rst_n( rst_n ),
+    .dbg_clk( dbg_clk ),
+    .dbg_data_in( dbg_data_in ),
+    .reg_rdata( reg_rdata ),
+    .dbg_data_out( dbg_data_out ),
+    .dbg_data_oe( dbg_data_oe ),
+    .reg_wr( s75 ),
+    .reg_addr( s76 ),
+    .reg_wdata( s77 )
+  );
+  // cpu_cycle_controller_tiny
+  cpu_cycle_controller_tiny cpu_cycle_controller_tiny_i17 (
+    .clk( s19 ),
+    .rst_n( rst_n ),
+    .fetch_done( Fetch_done ),
+    .data_done( data_done ),
+    .ld( ld ),
+    .st( st ),
+    .flash_ld( flash_req ),
+    .dbg_enable( dbg_en ),
+    .dbg_halt_req( halt_req ),
+    .dbg_run_req( run_req ),
+    .dbg_step_req( step_req ),
+    .dbg_break_hit( s82 ),
+    .dbg_break_after_exec( s83 ),
+    .fetch_req( fetch_request_pulse ),
+    .execute_now_pulse( \execute-pulse  ),
+    .dbg_halted( dbg_halted )
+  );
+  // memory_wait_controller_tiny
+  memory_wait_controller_tiny memory_wait_controller_tiny_i18 (
+    .clk( s19 ),
+    .rst_n( rst_n ),
+    .fetch_req( fetch_request_pulse ),
+    .ld_req( s78 ),
+    .st_req( s79 ),
+    .flash_req( s81 ),
+    .fetch_addr( programAddr ),
+    .data_addr( s10 ),
+    .store_data( s1 ),
+    .spi_data_out( spi_data ),
+    .spi_busy( spi_busy_ram ),
+    .mem_rdata( mem_out ),
+    .fetch_done( Fetch_done ),
+    .data_done( data_done ),
+    .mem_stall( s80 ),
+    .spi_st( spi_st ),
+    .spi_ld( spi_ld ),
+    .spi_addr( spi_addr ),
+    .spi_data_in( spi_data_out ),
+    .spi_target( spi_target )
+  );
+  // debug_core_tiny
+  debug_core_tiny debug_core_tiny_i19 (
+    .clk( s19 ),
+    .rst_n( rst_n ),
+    .reg_wr( s75 ),
+    .reg_addr( s76 ),
+    .reg_wdata( s77 ),
+    .cpu_dbg_halted( dbg_halted ),
+    .cpu_flags( flag_out ),
+    .cpu_pc( programAddr ),
+    .cpu_ir( inst_reg ),
+    .reg_rdata( reg_rdata ),
+    .dbg_enable( dbg_en ),
+    .dbg_halt_req( halt_req ),
+    .dbg_run_req( run_req ),
+    .dbg_step_req( step_req ),
+    .static_break_enable( ststic_break_en ),
+    .bp0( bp0 ),
+    .bp_enable( bp_en )
+  );
+  // breakpoint_logic_tiny
+  breakpoint_logic_tiny breakpoint_logic_tiny_i20 (
+    .clk( s19 ),
+    .rst_n( rst_n ),
+    .dbg_enable( dbg_en ),
+    .dbg_halted( dbg_halted ),
+    .dbg_run_req( run_req ),
+    .dbg_step_req( step_req ),
+    .execute_now_pulse( \execute-pulse  ),
+    .pc( programAddr ),
+    .bp0( bp0 ),
+    .bp_enable( bp_en ),
+    .instr_is_brk( Break ),
+    .static_break_enable( ststic_break_en ),
+    .dbg_break_hit( s82 ),
+    .dbg_break_after_exec( s83 )
+  );
+  assign s36 = (intr & \execute-pulse );
   assign outR[7:0] = uo_out_temp;
   assign outR[15:8] = 8'b0;
-  assign pc_en = (~ s56 & \execute-pulse );
   assign uio_oe[0] = 1'b0;
   assign uio_oe[1] = 1'b1;
   assign uio_oe[2] = 1'b1;
@@ -2640,54 +3034,60 @@ module tt_um_remedy_cpu (
   assign uio_oe[4] = 1'b1;
   assign uio_oe[5] = sda_oe;
   assign uio_oe[6] = scl_oe;
-  assign uio_oe[7] = 1'b0;
-  // is_different
-  is_different is_different_i20 (
-    .in1( s48 ),
-    .in2( s50 ),
-    .different( s49 )
-  );
+  assign uio_oe[7] = dbg_data_oe;
+  assign s58[0] = s59;
+  assign s58[1] = s60;
+  assign s58[2] = i2c_inter;
   Mux_2x1 Mux_2x1_i21 (
     .sel( spi_target ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
     .out( spics_ram )
   );
-  assign s76 = ~ spi_target;
-  assign s8 = s7[3:0];
-  assign s9 = s7[7:4];
-  assign OPcode = s7[15:8];
-  assign s42 = s1[7:0];
-  assign s19 = s7[7:0];
-  assign s71 = s1[8:0];
-  assign s70 = s1[7:0];
-  assign s66 = s1[3:0];
-  singExtend singExtend_i22 (
-    .inst( s19 ),
+  assign s67 = ~ spi_target;
+  assign flag_out[0] = s16;
+  assign flag_out[1] = s15;
+  assign flag_out[2] = s14;
+  assign pc_en = (~ s80 & \execute-pulse );
+  DIG_Add #(
+    .Bits(16)
+  )
+  DIG_Add_i22 (
+    .a( programAddr ),
+    .b( 16'b1 ),
+    .c_i( 1'b0 ),
+    .s( s11 )
+  );
+  assign s7 = inst_reg[3:0];
+  assign s8 = inst_reg[7:4];
+  assign OPcode = inst_reg[15:8];
+  assign s41 = s1[7:0];
+  assign s18 = inst_reg[7:0];
+  assign s62 = s1[8:0];
+  assign s61 = s1[7:0];
+  assign s57 = s1[3:0];
+  singExtend singExtend_i23 (
+    .inst( s18 ),
     .\4S ( s3 ),
     .\8SD ( s4 ),
     .\4D ( s5 )
   );
-  assign s67[0] = s49;
-  assign s67[1] = s68;
-  assign s67[2] = s69;
-  assign s67[3] = i2c_inter;
-  Mux_2x1 Mux_2x1_i23 (
-    .sel( s76 ),
+  Mux_2x1 Mux_2x1_i24 (
+    .sel( s67 ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
     .out( spics_flash )
   );
-  assign s21 = OPcode[6:0];
+  assign s20 = OPcode[6:0];
   assign imm = OPcode[7];
   Mux_2x1_NBits #(
     .Bits(7)
   )
-  Mux_2x1_NBits_i24 (
+  Mux_2x1_NBits_i25 (
     .sel( imm ),
-    .in_0( s21 ),
+    .in_0( s20 ),
     .in_1( 7'b0 ),
-    .out( s22 )
+    .out( s21 )
   );
   assign uio_out[0] = 1'b0;
   assign uio_out[1] = spics_ram;
@@ -2696,73 +3096,74 @@ module tt_um_remedy_cpu (
   assign uio_out[4] = spi_clock_ram;
   assign uio_out[5] = sda_o;
   assign uio_out[6] = scl_o;
-  assign uio_out[7] = 1'b0;
+  assign uio_out[7] = dbg_data_out;
   // opcode_microcode_rom
-  opcode_microcode_rom opcode_microcode_rom_i25 (
-    .opcode( s22 ),
-    .muxb0( s25 ),
-    .muxb1( s24 ),
-    .muxb2( s23 ),
-    .aluop0( s31 ),
-    .aluop1( s30 ),
-    .aluop2( s29 ),
-    .aluop3( s28 ),
-    .aluop4( s27 ),
-    .aluop5( s26 ),
-    .WE( s57 ),
-    .sf( s58 ),
-    .iem0( s36 ),
-    .iem1( s35 ),
-    .br0( s34 ),
-    .br1( s33 ),
-    .br2( s32 ),
+  opcode_microcode_rom opcode_microcode_rom_i26 (
+    .opcode( s21 ),
+    .muxb0( s24 ),
+    .muxb1( s23 ),
+    .muxb2( s22 ),
+    .aluop0( s30 ),
+    .aluop1( s29 ),
+    .aluop2( s28 ),
+    .aluop3( s27 ),
+    .aluop4( s26 ),
+    .aluop5( s25 ),
+    .WE( s49 ),
+    .sf( s50 ),
+    .iem0( s35 ),
+    .iem1( s34 ),
+    .br0( s33 ),
+    .br1( s32 ),
+    .br2( s31 ),
     .muxA( muxA ),
     .ld( ld ),
     .st( st ),
     .abs( abs ),
-    .ioW( s59 ),
-    .ioR( s60 ),
+    .ioW( s51 ),
+    .ioR( s52 ),
     .stPC( stPC ),
     .Reti( Reti ),
-    .flash_req( flash_req )
+    .flash_req( flash_req ),
+    .Brk( Break )
   );
   Mux_2x1_NBits #(
     .Bits(16)
   )
-  Mux_2x1_NBits_i26 (
+  Mux_2x1_NBits_i27 (
     .sel( muxA ),
     .in_0( s0 ),
     .in_1( s1 ),
     .out( s2 )
   );
-  assign muxB[0] = s23;
-  assign muxB[1] = s24;
-  assign muxB[2] = s25;
-  assign aluOp[0] = s26;
-  assign aluOp[1] = s27;
-  assign aluOp[2] = s28;
-  assign aluOp[3] = s29;
-  assign aluOp[4] = s30;
-  assign aluOp[5] = s31;
-  assign br[0] = s32;
-  assign br[1] = s33;
-  assign br[2] = s34;
-  assign iem[0] = s35;
-  assign iem[1] = s36;
-  assign s38 = (\execute-pulse  & Reti);
-  assign s53 = (ld & \execute-pulse );
-  assign s54 = (\execute-pulse  & st);
-  assign WE = (((~ flash_req | ~ ld) & \execute-pulse  & s57) | (s57 & data_done & (flash_req | ld)));
-  assign sf = (s58 & \execute-pulse );
-  assign s40 = (s59 & \execute-pulse );
-  assign s52 = (s60 & \execute-pulse );
-  assign s46 = (abs & \execute-pulse );
-  assign s51 = (flash_req | ld);
-  assign s55 = (\execute-pulse  & flash_req);
+  assign muxB[0] = s22;
+  assign muxB[1] = s23;
+  assign muxB[2] = s24;
+  assign aluOp[0] = s25;
+  assign aluOp[1] = s26;
+  assign aluOp[2] = s27;
+  assign aluOp[3] = s28;
+  assign aluOp[4] = s29;
+  assign aluOp[5] = s30;
+  assign br[0] = s31;
+  assign br[1] = s32;
+  assign br[2] = s33;
+  assign iem[0] = s34;
+  assign iem[1] = s35;
+  assign s37 = (\execute-pulse  & Reti);
+  assign WE = (((~ flash_req | ~ ld) & \execute-pulse  & s49) | (s49 & data_done & (flash_req | ld)));
+  assign sf = (s50 & \execute-pulse );
+  assign s39 = (s51 & \execute-pulse );
+  assign s48 = (s52 & \execute-pulse );
+  assign s45 = (abs & \execute-pulse );
+  assign s47 = (flash_req | ld);
+  assign s78 = (ld & \execute-pulse );
+  assign s79 = (\execute-pulse  & st);
+  assign s81 = (\execute-pulse  & flash_req);
   Mux_8x1_NBits #(
     .Bits(16)
   )
-  Mux_8x1_NBits_i27 (
+  Mux_8x1_NBits_i28 (
     .sel( muxB ),
     .in_0( s1 ),
     .in_1( 16'b0 ),
@@ -2775,65 +3176,65 @@ module tt_um_remedy_cpu (
     .out( s6 )
   );
   // muxEncoder
-  muxEncoder muxEncoder_i28 (
+  muxEncoder muxEncoder_i29 (
     .a( 1'b0 ),
-    .b( s51 ),
-    .c( s52 ),
+    .b( s47 ),
+    .c( s48 ),
     .d( stPC ),
-    .Q( s10 )
+    .Q( s9 )
   );
-  assign s14 = br[1:0];
-  Mux_4x1 Mux_4x1_i29 (
-    .sel( s14 ),
+  assign s13 = br[1:0];
+  Mux_4x1 Mux_4x1_i30 (
+    .sel( s13 ),
     .in_0( 1'b0 ),
-    .in_1( s15 ),
-    .in_2( s16 ),
-    .in_3( s17 ),
-    .out( s18 )
+    .in_1( s14 ),
+    .in_2( s15 ),
+    .in_3( s16 ),
+    .out( s17 )
   );
-  Alu Alu_i30 (
+  Alu Alu_i31 (
     .A( s2 ),
     .B( s6 ),
-    .carryIn( s15 ),
+    .carryIn( s14 ),
     .AluOp( aluOp ),
-    .Out( s11 ),
-    .Neg( s43 ),
-    .Zero( s44 ),
-    .CarryOut( s45 )
+    .Out( s10 ),
+    .Neg( s42 ),
+    .Zero( s43 ),
+    .CarryOut( s44 )
   );
   Mux_4x1_NBits #(
     .Bits(16)
   )
-  Mux_4x1_NBits_i31 (
-    .sel( s10 ),
-    .in_0( s11 ),
+  Mux_4x1_NBits_i32 (
+    .sel( s9 ),
+    .in_0( s10 ),
     .in_1( mem_out ),
     .in_2( iow_Din ),
-    .in_3( s12 ),
-    .out( s13 )
+    .in_3( s11 ),
+    .out( s12 )
   );
   CompSigned #(
     .Bits(16)
   )
-  CompSigned_i32 (
-    .a( s11 ),
+  CompSigned_i33 (
+    .a( s10 ),
     .b( 16'b1 ),
-    .\= ( s39 )
+    .\= ( s38 )
   );
-  assign s47 = ((s18 ^ br[2]) & \execute-pulse );
-  assign s74 = (s11[4] & s40);
-  assign s73 = s11[4:0];
-  assign s75 = s11[3:0];
-  assign s41 = (s39 & s40);
-  assign s77 = s73[0];
-  assign s78 = s73[1];
-  assign s79 = s73[2];
-  assign s80 = s73[3];
-  assign s81 = s73[4];
-  assign s82 = ~ s79;
-  assign s83 = ~ s78;
-  assign s72[0] = ((~ s81 & s82 & s83 & s77) | (s80 & s83 & s77) | (s80 & s82 & s83) | (s79 & s78));
-  assign s72[1] = (s81 | (~ s80 & s78) | (~ s80 & s79) | (s80 & s82 & s83));
-  assign s72[2] = (s81 | (s80 & s78 & s77) | (s80 & s79));
+  assign s46 = ((s17 ^ br[2]) & \execute-pulse );
+  assign s65 = (s10[4] & s39);
+  assign s64 = s10[4:0];
+  assign s66 = s10[3:0];
+  assign s40 = (s38 & s39);
+  assign s68 = s64[0];
+  assign s69 = s64[1];
+  assign s70 = s64[2];
+  assign s71 = s64[3];
+  assign s72 = s64[4];
+  assign s73 = ~ s70;
+  assign s74 = ~ s69;
+  assign s63[0] = ((~ s72 & s73 & s74 & s68) | (s71 & s74 & s68) | (s71 & s73 & s74) | (s70 & s69));
+  assign s63[1] = (s72 | (~ s71 & s69) | (~ s71 & s70) | (s71 & s73 & s74));
+  assign s63[2] = (s72 | (s71 & s69 & s68) | (s71 & s70));
   assign uo_out = uo_out_temp;
 endmodule
