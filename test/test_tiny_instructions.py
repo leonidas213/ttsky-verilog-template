@@ -830,7 +830,7 @@ async def test_cpu_in_inputreg(dut):
     pins, flash, ram = await boot_cpu(dut)
     flash.trace_fetch = True
 
-    dut.ui_in.value = 0xA5
+    dut.ui_in.value = 0x25
 
     #  0:0 |    0 |       ; start:
     #  0:0 |    0 | 3d 02 ; jump main
@@ -853,9 +853,9 @@ async def test_cpu_in_inputreg(dut):
     cocotb.start_soon(ram.run())
     await reset_dut(dut)
 
-    dut.ui_in.value = 0xA5
+    dut.ui_in.value = 0x25
     await flash.wait_instructions(6)
-    assert dut.uo_out.value == 0xA5, f"Expected 0xA5 but got {dut.uo_out.value}"
+    assert dut.uo_out.value == 0x25, f"Expected 0x25 but got {dut.uo_out.value}"
 
 
 @cocotb.test()
@@ -2278,7 +2278,7 @@ async def test_cpu_timer1_interrupt_basic(dut):
     # 1c:0 |    e |             ; main:
     # 1c:0 |    e | 0a 21       ; ldi r2, 1
     # 1e:0 |    f | 3f d2       ; out CpuinterruptEnable, r2
-    # 20:0 |   10 | 0a 22       ; ldi r2, 0b0010
+    # 20:0 |   10 | 0a 21       ; ldi r2, 0b0001
     # 22:0 |   11 | 3f e2       ; out InputInterruptEnable, r2
     # 24:0 |   12 | 81 ff 09 20 ; ldi r2, 0x1ff
     # 28:0 |   14 | 3f 32       ; out timer1Target, r2
@@ -2304,7 +2304,7 @@ async def test_cpu_timer1_interrupt_basic(dut):
     flash.poke16w(0x000D, 0x4400)
     flash.poke16w(0x000E, 0x0A21)
     flash.poke16w(0x000F, 0x3FD2)
-    flash.poke16w(0x0010, 0x0A22)
+    flash.poke16w(0x0010, 0x0A21)
     flash.poke16w(0x0011, 0x3FE2)
     flash.poke16w(0x0012, 0x81FF)
     flash.poke16w(0x0013, 0x0920)
