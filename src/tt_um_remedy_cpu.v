@@ -206,7 +206,6 @@ module programCounter
     input  wire        intr,
     input  wire        reti,
     input  wire        relJmp,
-    output wire [15:0] Nextpc,
     output wire [15:0] PC
   );
 
@@ -214,9 +213,6 @@ module programCounter
   reg [15:0] interruptAdress;
 
   reg [15:0] PCr;
-  reg [15:0] Nextpcr;
-
-  assign Nextpc = Nextpcr;
   assign PC     = PCr;
 
   always @(posedge clk , negedge rst_n)
@@ -224,7 +220,6 @@ module programCounter
     if (!rst_n)
     begin
       PCr     <= 16'h0000;
-      Nextpcr <= 16'h0001;
       interruptAdress <= 16'h0000;
     end
     else if (pc_en)
@@ -232,7 +227,6 @@ module programCounter
       if (reti)
       begin
         PCr     <= interruptAdress + 16'd1;
-        Nextpcr <= interruptAdress + 16'd2;
       end
       else if (intr)
       begin
@@ -242,22 +236,18 @@ module programCounter
           interruptAdress <= PCr;
 
         PCr     <= interuptFuncAdr;
-        Nextpcr <= interuptFuncAdr + 16'd1;
       end
       else if (relJmp)
       begin
         PCr     <= PCr + AluIn + 16'd1;
-        Nextpcr <= Nextpcr + AluIn + 16'd1;
       end
       else if (absJmp)
       begin
         PCr     <= AluIn;
-        Nextpcr <= AluIn + 16'd1;
       end
       else
       begin
         PCr     <= PCr + 16'd1;
-        Nextpcr <= Nextpcr + 16'd1;
       end
     end
   end
@@ -976,402 +966,469 @@ module i2c_master_ctrl (
     output reg         scl_oe,
 
     output             interrupt
-);
+  );
 
-assign sda_out = 1'b0;
-assign scl_out = 1'b0;
-assign interrupt = irq_enable & irq_pending;
+  assign sda_out = 1'b0;
+  assign scl_out = 1'b0;
+  assign interrupt = irq_enable & irq_pending;
 
-localparam ST_IDLE       = 4'd0;
-localparam ST_START_1    = 4'd1;
-localparam ST_START_2    = 4'd2;
-localparam ST_START_3    = 4'd3;
-localparam ST_BIT_SETUP  = 4'd4;
-localparam ST_BIT_HIGH   = 4'd5;
-localparam ST_BIT_LOW    = 4'd6;
-localparam ST_ACK_SETUPW = 4'd7;
-localparam ST_ACK_HIGHW  = 4'd8;
-localparam ST_ACK_LOWW   = 4'd9;
-localparam ST_ACK_SETUPR = 4'd10;
-localparam ST_ACK_HIGHR  = 4'd11;
-localparam ST_ACK_LOWR   = 4'd12;
-localparam ST_STOP_1     = 4'd13;
-localparam ST_STOP_2     = 4'd14;
-localparam ST_STOP_3     = 4'd15;
+  // scl_in is kept only for interface compatibility. Clock stretching support is removed.
+  wire _unused_scl_in;
+  assign _unused_scl_in = scl_in;
 
-reg        enable;
-reg        irq_enable;
-reg        stretch_enable;
+  localparam ST_IDLE       = 4'd0;
+  localparam ST_START_1    = 4'd1;
+  localparam ST_START_2    = 4'd2;
+  localparam ST_START_3    = 4'd3;
+  localparam ST_BIT_SETUP  = 4'd4;
+  localparam ST_BIT_HIGH   = 4'd5;
+  localparam ST_BIT_LOW    = 4'd6;
+  localparam ST_ACK_SETUPW = 4'd7;
+  localparam ST_ACK_HIGHW  = 4'd8;
+  localparam ST_ACK_LOWW   = 4'd9;
+  localparam ST_ACK_SETUPR = 4'd10;
+  localparam ST_ACK_HIGHR  = 4'd11;
+  localparam ST_ACK_LOWR   = 4'd12;
+  localparam ST_STOP_1     = 4'd13;
+  localparam ST_STOP_2     = 4'd14;
+  localparam ST_STOP_3     = 4'd15;
 
-reg        op_busy;
-reg        bus_active;
-reg        done;
-reg        ack_error;
-reg        rx_valid;
-reg        irq_pending;
+  reg        enable;
+  reg        irq_enable;
 
-reg [15:0] prescale_reg;
-reg [15:0] divcnt;
-reg        sm_tick;
+  reg        op_busy;
+  reg        bus_active;
+  reg        done;
+  reg        ack_error;
+  reg        rx_valid;
+  reg        irq_pending;
 
-reg [7:0]  tx_data_reg;
-reg [7:0]  rx_data_reg;
+  reg [15:0] prescale_reg;
+  reg [15:0] divcnt;
+  reg        sm_tick;
 
-reg [7:0]  tx_shift;
-reg [7:0]  rx_shift;
-reg [3:0]  bit_count;
+  reg [7:0]  tx_data_reg;
+  reg [7:0]  rx_data_reg;
 
-reg        cmd_start;
-reg        cmd_stop;
-reg        cmd_write;
-reg        cmd_read;
-reg        cmd_read_nack;
+  reg [7:0]  tx_shift;
+  reg [7:0]  rx_shift;
+  reg [3:0]  bit_count;
 
-reg [3:0]  state;
+  reg        cmd_start;
+  reg        cmd_stop;
+  reg        cmd_write;
+  reg        cmd_read;
+  reg        cmd_read_nack;
 
-wire launch_cmd;
-assign launch_cmd = wr_en && (reg_addr == 4'h4) && !op_busy && enable &&
-                    (cpu_din[0] || cpu_din[1] || cpu_din[2] || cpu_din[3]);
+  reg [3:0]  state;
 
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        enable         <= 1'b0;
-        irq_enable     <= 1'b0;
-        stretch_enable <= 1'b0;
+  wire launch_cmd;
+  assign launch_cmd = wr_en && (reg_addr == 4'h4) && !op_busy && enable &&
+         (cpu_din[0] || cpu_din[1] || cpu_din[2] || cpu_din[3]);
 
-        op_busy        <= 1'b0;
-        bus_active     <= 1'b0;
-        done           <= 1'b0;
-        ack_error      <= 1'b0;
-        rx_valid       <= 1'b0;
-        irq_pending    <= 1'b0;
+  always @(posedge clk or negedge rst_n)
+  begin
+    if (!rst_n)
+    begin
+      enable         <= 1'b0;
+      irq_enable     <= 1'b0;
 
-        prescale_reg   <= 16'd0;
-        divcnt         <= 16'd0;
-        sm_tick        <= 1'b0;
+      op_busy        <= 1'b0;
+      bus_active     <= 1'b0;
+      done           <= 1'b0;
+      ack_error      <= 1'b0;
+      rx_valid       <= 1'b0;
+      irq_pending    <= 1'b0;
 
-        tx_data_reg    <= 8'd0;
-        rx_data_reg    <= 8'd0;
-        tx_shift       <= 8'd0;
-        rx_shift       <= 8'd0;
-        bit_count      <= 4'd0;
+      prescale_reg   <= 16'd0;
+      divcnt         <= 16'd0;
+      sm_tick        <= 1'b0;
 
-        cmd_start      <= 1'b0;
-        cmd_stop       <= 1'b0;
-        cmd_write      <= 1'b0;
-        cmd_read       <= 1'b0;
-        cmd_read_nack  <= 1'b0;
+      tx_data_reg    <= 8'd0;
+      rx_data_reg    <= 8'd0;
+      tx_shift       <= 8'd0;
+      rx_shift       <= 8'd0;
+      bit_count      <= 4'd0;
 
-        state          <= ST_IDLE;
+      cmd_start      <= 1'b0;
+      cmd_stop       <= 1'b0;
+      cmd_write      <= 1'b0;
+      cmd_read       <= 1'b0;
+      cmd_read_nack  <= 1'b0;
 
-        sda_oe         <= 1'b0;
-        scl_oe         <= 1'b0;
-    end else begin
-        sm_tick <= 1'b0;
+      state          <= ST_IDLE;
 
-        if (op_busy) begin
-            if (prescale_reg == 16'd0) begin
-                sm_tick <= 1'b1;
-            end else begin
-                if (divcnt == 16'd0) begin
-                    divcnt  <= prescale_reg;
-                    sm_tick <= 1'b1;
-                end else begin
-                    divcnt <= divcnt - 16'd1;
-                end
-            end
-        end else begin
-            divcnt <= 16'd0;
-        end
-
-        if (wr_en) begin
-            case (reg_addr)
-                4'h0: begin
-                    enable         <= cpu_din[0];
-                    irq_enable     <= cpu_din[1];
-                    stretch_enable <= cpu_din[2];
-                end
-
-                4'h1: begin
-                    if (cpu_din[2]) done        <= 1'b0;
-                    if (cpu_din[3]) ack_error   <= 1'b0;
-                    if (cpu_din[4]) rx_valid    <= 1'b0;
-                    if (cpu_din[5]) irq_pending <= 1'b0;
-                end
-
-                4'h2: begin
-                    prescale_reg <= cpu_din;
-                end
-
-                4'h3: begin
-                    tx_data_reg <= cpu_din[7:0];
-                end
-                default:begin
-
-                    
-                end
-            endcase
-        end
-
-        if (launch_cmd) begin
-            cmd_start     <= cpu_din[0];
-            cmd_stop      <= cpu_din[1];
-            cmd_write     <= cpu_din[2];
-            cmd_read      <= cpu_din[3];
-            cmd_read_nack <= cpu_din[4];
-
-            done        <= 1'b0;
-            ack_error   <= 1'b0;
-            irq_pending <= 1'b0;
-
-            tx_shift    <= tx_data_reg;
-            rx_shift    <= 8'd0;
-            bit_count   <= 4'd7;
-            op_busy     <= 1'b1;
-
-            if (cpu_din[0]) begin
-                state  <= ST_START_1;
-                sda_oe <= 1'b0;
-                scl_oe <= 1'b0;
-            end else if (cpu_din[2] || cpu_din[3]) begin
-                state <= ST_BIT_SETUP;
-                scl_oe <= 1'b1;
-            end else if (cpu_din[1]) begin
-                state  <= ST_STOP_1;
-                sda_oe <= 1'b1;
-                scl_oe <= 1'b1;
-            end else begin
-                op_busy <= 1'b0;
-                done    <= 1'b1;
-                irq_pending <= 1'b1;
-                state   <= ST_IDLE;
-            end
-        end
-
-        if (sm_tick && op_busy) begin
-            case (state)
-                ST_IDLE: begin
-                    op_busy <= 1'b0;
-                end
-
-                ST_START_1: begin
-                    sda_oe <= 1'b0;
-                    scl_oe <= 1'b0;
-                    if (sda_in && ((!stretch_enable) || scl_in)) begin
-                        state <= ST_START_2;
-                    end
-                end
-
-                ST_START_2: begin
-                    sda_oe <= 1'b1; // SDA low while SCL high
-                    scl_oe <= 1'b0;
-                    state  <= ST_START_3;
-                end
-
-                ST_START_3: begin
-                    scl_oe     <= 1'b1; // pull SCL low
-                    bus_active <= 1'b1;
-
-                    if (cmd_write || cmd_read) begin
-                        state <= ST_BIT_SETUP;
-                    end else if (cmd_stop) begin
-                        state <= ST_STOP_1;
-                    end else begin
-                        done        <= 1'b1;
-                        irq_pending <= 1'b1;
-                        op_busy     <= 1'b0;
-                        state       <= ST_IDLE;
-                    end
-                end
-
-                ST_BIT_SETUP: begin
-                    scl_oe <= 1'b1; // keep clock low during setup
-
-                    if (cmd_write) begin
-                        if (tx_shift[bit_count])
-                            sda_oe <= 1'b0; // release for logic 1
-                        else
-                            sda_oe <= 1'b1; // drive low for logic 0
-                    end else begin
-                        sda_oe <= 1'b0; // read bit: release SDA
-                    end
-
-                    state <= ST_BIT_HIGH;
-                end
-
-                ST_BIT_HIGH: begin
-                    scl_oe <= 1'b0; // release SCL high
-
-                    if ((!stretch_enable) || scl_in) begin
-                        if (cmd_read)
-                            rx_shift[bit_count] <= sda_in;
-
-                        state <= ST_BIT_LOW;
-                    end
-                end
-
-                ST_BIT_LOW: begin
-                    scl_oe <= 1'b1; // drive SCL low again
-
-                    if (bit_count != 4'd0) begin
-                        bit_count <= bit_count - 4'd1;
-                        state     <= ST_BIT_SETUP;
-                    end else begin
-                        if (cmd_write)
-                            state <= ST_ACK_SETUPW;
-                        else
-                            state <= ST_ACK_SETUPR;
-                    end
-                end
-
-                ST_ACK_SETUPW: begin
-                    sda_oe <= 1'b0; // slave drives ACK/NACK
-                    scl_oe <= 1'b1;
-                    state  <= ST_ACK_HIGHW;
-                end
-
-                ST_ACK_HIGHW: begin
-                    scl_oe <= 1'b0;
-
-                    if ((!stretch_enable) || scl_in) begin
-                        if (sda_in)
-                            ack_error <= 1'b1;
-
-                        state <= ST_ACK_LOWW;
-                    end
-                end
-
-                ST_ACK_LOWW: begin
-                    scl_oe <= 1'b1;
-                    sda_oe <= 1'b0;
-
-                    if (cmd_stop) begin
-                        state <= ST_STOP_1;
-                    end else begin
-                        done        <= 1'b1;
-                        irq_pending <= 1'b1;
-                        op_busy     <= 1'b0;
-                        state       <= ST_IDLE;
-                    end
-                end
-
-                ST_ACK_SETUPR: begin
-                    scl_oe <= 1'b1;
-
-                    if (cmd_read_nack)
-                        sda_oe <= 1'b0; // NACK = release high
-                    else
-                        sda_oe <= 1'b1; // ACK = drive low
-
-                    state <= ST_ACK_HIGHR;
-                end
-
-                ST_ACK_HIGHR: begin
-                    scl_oe <= 1'b0;
-
-                    if ((!stretch_enable) || scl_in) begin
-                        state <= ST_ACK_LOWR;
-                    end
-                end
-
-                ST_ACK_LOWR: begin
-                    scl_oe      <= 1'b1;
-                    sda_oe      <= 1'b0;
-                    rx_data_reg <= rx_shift;
-                    rx_valid    <= 1'b1;
-
-                    if (cmd_stop) begin
-                        state <= ST_STOP_1;
-                    end else begin
-                        done        <= 1'b1;
-                        irq_pending <= 1'b1;
-                        op_busy     <= 1'b0;
-                        state       <= ST_IDLE;
-                    end
-                end
-
-                ST_STOP_1: begin
-                    sda_oe <= 1'b1; // SDA low
-                    scl_oe <= 1'b1; // SCL low
-                    state  <= ST_STOP_2;
-                end
-
-                ST_STOP_2: begin
-                    sda_oe <= 1'b1; // keep SDA low
-                    scl_oe <= 1'b0; // release SCL high
-
-                    if ((!stretch_enable) || scl_in) begin
-                        state <= ST_STOP_3;
-                    end
-                end
-
-                ST_STOP_3: begin
-                    sda_oe      <= 1'b0; // release SDA high
-                    scl_oe      <= 1'b0;
-                    bus_active  <= 1'b0;
-                    done        <= 1'b1;
-                    irq_pending <= 1'b1;
-                    op_busy     <= 1'b0;
-                    state       <= ST_IDLE;
-                end
-
-                default: begin
-                    sda_oe      <= 1'b0;
-                    scl_oe      <= 1'b0;
-                    bus_active  <= 1'b0;
-                    done        <= 1'b1;
-                    ack_error   <= 1'b1;
-                    irq_pending <= 1'b1;
-                    op_busy     <= 1'b0;
-                    state       <= ST_IDLE;
-                end
-            endcase
-        end
+      sda_oe         <= 1'b0;
+      scl_oe         <= 1'b0;
     end
-end
+    else
+    begin
+      sm_tick <= 1'b0;
 
-always @(*) begin
+      if (op_busy)
+      begin
+        if (prescale_reg == 16'd0)
+        begin
+          sm_tick <= 1'b1;
+        end
+        else
+        begin
+          if (divcnt == 16'd0)
+          begin
+            divcnt  <= prescale_reg;
+            sm_tick <= 1'b1;
+          end
+          else
+          begin
+            divcnt <= divcnt - 16'd1;
+          end
+        end
+      end
+      else
+      begin
+        divcnt <= 16'd0;
+      end
+
+      if (wr_en)
+      begin
+        case (reg_addr)
+          4'h0:
+          begin
+            enable     <= cpu_din[0];
+            irq_enable <= cpu_din[1];
+          end
+
+          4'h1:
+          begin
+            if (cpu_din[2])
+              done        <= 1'b0;
+            if (cpu_din[3])
+              ack_error   <= 1'b0;
+            if (cpu_din[4])
+              rx_valid    <= 1'b0;
+            if (cpu_din[5])
+              irq_pending <= 1'b0;
+          end
+
+          4'h2:
+          begin
+            prescale_reg <= cpu_din;
+          end
+
+          4'h3:
+          begin
+            tx_data_reg <= cpu_din[7:0];
+          end
+          default:
+          begin
+          end
+
+        endcase
+      end
+
+      if (launch_cmd)
+      begin
+        cmd_start     <= cpu_din[0];
+        cmd_stop      <= cpu_din[1];
+        cmd_write     <= cpu_din[2];
+        cmd_read      <= cpu_din[3];
+        cmd_read_nack <= cpu_din[4];
+
+        done        <= 1'b0;
+        ack_error   <= 1'b0;
+        irq_pending <= 1'b0;
+
+        tx_shift    <= tx_data_reg;
+        rx_shift    <= 8'd0;
+        bit_count   <= 4'd7;
+        op_busy     <= 1'b1;
+
+        if (cpu_din[0])
+        begin
+          state  <= ST_START_1;
+          sda_oe <= 1'b0;
+          scl_oe <= 1'b0;
+        end
+        else if (cpu_din[2] || cpu_din[3])
+        begin
+          state  <= ST_BIT_SETUP;
+          scl_oe <= 1'b1;
+        end
+        else if (cpu_din[1])
+        begin
+          state  <= ST_STOP_1;
+          sda_oe <= 1'b1;
+          scl_oe <= 1'b1;
+        end
+        else
+        begin
+          op_busy     <= 1'b0;
+          done        <= 1'b1;
+          irq_pending <= 1'b1;
+          state       <= ST_IDLE;
+        end
+      end
+
+      if (sm_tick && op_busy)
+      begin
+        case (state)
+          ST_IDLE:
+          begin
+            op_busy <= 1'b0;
+          end
+
+          ST_START_1:
+          begin
+            sda_oe <= 1'b0;
+            scl_oe <= 1'b0;
+            if (sda_in)
+            begin
+              state <= ST_START_2;
+            end
+          end
+
+          ST_START_2:
+          begin
+            sda_oe <= 1'b1; // SDA low while SCL high
+            scl_oe <= 1'b0;
+            state  <= ST_START_3;
+          end
+
+          ST_START_3:
+          begin
+            scl_oe     <= 1'b1; // pull SCL low
+            bus_active <= 1'b1;
+
+            if (cmd_write || cmd_read)
+            begin
+              state <= ST_BIT_SETUP;
+            end
+            else if (cmd_stop)
+            begin
+              state <= ST_STOP_1;
+            end
+            else
+            begin
+              done        <= 1'b1;
+              irq_pending <= 1'b1;
+              op_busy     <= 1'b0;
+              state       <= ST_IDLE;
+            end
+          end
+
+          ST_BIT_SETUP:
+          begin
+            scl_oe <= 1'b1; // keep clock low during setup
+
+            if (cmd_write)
+            begin
+              if (tx_shift[bit_count])
+                sda_oe <= 1'b0; // release for logic 1
+              else
+                sda_oe <= 1'b1; // drive low for logic 0
+            end
+            else
+            begin
+              sda_oe <= 1'b0; // read bit: release SDA
+            end
+
+            state <= ST_BIT_HIGH;
+          end
+
+          ST_BIT_HIGH:
+          begin
+            scl_oe <= 1'b0; // release SCL high
+
+            if (cmd_read)
+              rx_shift[bit_count] <= sda_in;
+
+            state <= ST_BIT_LOW;
+          end
+
+          ST_BIT_LOW:
+          begin
+            scl_oe <= 1'b1; // drive SCL low again
+
+            if (bit_count != 4'd0)
+            begin
+              bit_count <= bit_count - 4'd1;
+              state     <= ST_BIT_SETUP;
+            end
+            else
+            begin
+              if (cmd_write)
+                state <= ST_ACK_SETUPW;
+              else
+                state <= ST_ACK_SETUPR;
+            end
+          end
+
+          ST_ACK_SETUPW:
+          begin
+            sda_oe <= 1'b0; // slave drives ACK/NACK
+            scl_oe <= 1'b1;
+            state  <= ST_ACK_HIGHW;
+          end
+
+          ST_ACK_HIGHW:
+          begin
+            scl_oe <= 1'b0;
+
+            if (sda_in)
+              ack_error <= 1'b1;
+
+            state <= ST_ACK_LOWW;
+          end
+
+          ST_ACK_LOWW:
+          begin
+            scl_oe <= 1'b1;
+            sda_oe <= 1'b0;
+
+            if (cmd_stop)
+            begin
+              state <= ST_STOP_1;
+            end
+            else
+            begin
+              done        <= 1'b1;
+              irq_pending <= 1'b1;
+              op_busy     <= 1'b0;
+              state       <= ST_IDLE;
+            end
+          end
+
+          ST_ACK_SETUPR:
+          begin
+            scl_oe <= 1'b1;
+
+            if (cmd_read_nack)
+              sda_oe <= 1'b0; // NACK = release high
+            else
+              sda_oe <= 1'b1; // ACK = drive low
+
+            state <= ST_ACK_HIGHR;
+          end
+
+          ST_ACK_HIGHR:
+          begin
+            scl_oe <= 1'b0;
+            state  <= ST_ACK_LOWR;
+          end
+
+          ST_ACK_LOWR:
+          begin
+            scl_oe      <= 1'b1;
+            sda_oe      <= 1'b0;
+            rx_data_reg <= rx_shift;
+            rx_valid    <= 1'b1;
+
+            if (cmd_stop)
+            begin
+              state <= ST_STOP_1;
+            end
+            else
+            begin
+              done        <= 1'b1;
+              irq_pending <= 1'b1;
+              op_busy     <= 1'b0;
+              state       <= ST_IDLE;
+            end
+          end
+
+          ST_STOP_1:
+          begin
+            sda_oe <= 1'b1; // SDA low
+            scl_oe <= 1'b1; // SCL low
+            state  <= ST_STOP_2;
+          end
+
+          ST_STOP_2:
+          begin
+            sda_oe <= 1'b1; // keep SDA low
+            scl_oe <= 1'b0; // release SCL high
+            state  <= ST_STOP_3;
+          end
+
+          ST_STOP_3:
+          begin
+            sda_oe      <= 1'b0; // release SDA high
+            scl_oe      <= 1'b0;
+            bus_active  <= 1'b0;
+            done        <= 1'b1;
+            irq_pending <= 1'b1;
+            op_busy     <= 1'b0;
+            state       <= ST_IDLE;
+          end
+
+          default:
+          begin
+            sda_oe      <= 1'b0;
+            scl_oe      <= 1'b0;
+            bus_active  <= 1'b0;
+            done        <= 1'b1;
+            ack_error   <= 1'b1;
+            irq_pending <= 1'b1;
+            op_busy     <= 1'b0;
+            state       <= ST_IDLE;
+          end
+        endcase
+      end
+    end
+  end
+
+  always @(*)
+  begin
     cpu_dout = 16'd0;
 
     case (reg_addr)
-        4'h0: begin
-            cpu_dout[0] = enable;
-            cpu_dout[1] = irq_enable;
-            cpu_dout[2] = stretch_enable;
-        end
+      4'h0:
+      begin
+        cpu_dout[0] = enable;
+        cpu_dout[1] = irq_enable;
+        cpu_dout[2] = 1'b0; // clock stretching removed
+      end
 
-        4'h1: begin
-            cpu_dout[0] = op_busy;
-            cpu_dout[1] = bus_active;
-            cpu_dout[2] = done;
-            cpu_dout[3] = ack_error;
-            cpu_dout[4] = rx_valid;
-            cpu_dout[5] = irq_pending;
-        end
+      4'h1:
+      begin
+        cpu_dout[0] = op_busy;
+        cpu_dout[1] = bus_active;
+        cpu_dout[2] = done;
+        cpu_dout[3] = ack_error;
+        cpu_dout[4] = rx_valid;
+        cpu_dout[5] = irq_pending;
+      end
 
-        4'h2: begin
-            cpu_dout = prescale_reg;
-        end
+      4'h2:
+      begin
+        cpu_dout = prescale_reg;
+      end
 
-        4'h3: begin
-            cpu_dout[7:0] = rx_data_reg;
-        end
+      4'h3:
+      begin
+        cpu_dout[7:0] = rx_data_reg;
+      end
 
-        4'h4: begin
-            cpu_dout[0] = cmd_start;
-            cpu_dout[1] = cmd_stop;
-            cpu_dout[2] = cmd_write;
-            cpu_dout[3] = cmd_read;
-            cpu_dout[4] = cmd_read_nack;
-        end
+      4'h4:
+      begin
+        cpu_dout[0] = cmd_start;
+        cpu_dout[1] = cmd_stop;
+        cpu_dout[2] = cmd_write;
+        cpu_dout[3] = cmd_read;
+        cpu_dout[4] = cmd_read_nack;
+      end
 
-        default: begin
-            cpu_dout = 16'd0;
-        end
+      default:
+      begin
+        cpu_dout = 16'd0;
+      end
     endcase
-end
+  end
 
 endmodule
+
+
+
 module debug_serial_frontend_tiny
 (
     input  wire        cpu_clk,
@@ -1388,145 +1445,136 @@ module debug_serial_frontend_tiny
     input  wire [15:0] reg_rdata
 );
 
-  localparam CMD_PING  = 4'h0;
-  localparam CMD_READ  = 4'h1;
-  localparam CMD_WRITE = 4'h2;
+    localparam S_RX        = 3'd0;
+    localparam S_EXEC      = 3'd1;
+    localparam S_LOAD_TX   = 3'd2;
+    localparam S_TURNAROUND= 3'd3;
+    localparam S_TX        = 3'd4;
 
-  localparam S_RX      = 2'd0;
-  localparam S_EXEC    = 2'd1;
-  localparam S_LOAD_TX = 2'd2;
-  localparam S_TX      = 2'd3;
+    localparam CMD_PING  = 4'h0;
+    localparam CMD_READ  = 4'h1;
+    localparam CMD_WRITE = 4'h2;
 
-  reg [1:0]  state;
-  reg [23:0] rx_shift;
-  reg [4:0]  rx_count;
-  reg [15:0] tx_shift;
-  reg [4:0]  tx_count;
+    reg [2:0]  state;
 
-  reg [3:0]  cmd_hold;
-  reg [3:0]  addr_hold;
-  reg [15:0] wdata_hold;
+    reg [2:0]  dbg_clk_sync;
+    reg [1:0]  dbg_data_sync;
 
-  reg [1:0] dbg_clk_sync;
-  reg [1:0] dbg_data_sync;
+    wire dbg_clk_rise;
+    wire dbg_clk_fall;
 
-  wire dbg_clk_rise;
-  wire dbg_clk_fall;
-  wire [23:0] rx_next;
-  wire [15:0] tx_word;
+    assign dbg_clk_rise = (dbg_clk_sync[2:1] == 2'b01);
+    assign dbg_clk_fall = (dbg_clk_sync[2:1] == 2'b10);
 
-  assign dbg_clk_rise = (dbg_clk_sync == 2'b01);
-  assign dbg_clk_fall = (dbg_clk_sync == 2'b10);
-  assign rx_next      = {rx_shift[22:0], dbg_data_sync[1]};
-  assign tx_word      = (cmd_hold == CMD_PING)  ? 16'hDB12 :
-                        (cmd_hold == CMD_READ)  ? reg_rdata :
-                        (cmd_hold == CMD_WRITE) ? 16'hACCE :
-                                                  16'hEEEE;
+    reg [23:0] rx_shift;
+    reg [4:0]  rx_count;
 
-  always @(posedge cpu_clk or negedge rst_n)
-  begin
-    if (!rst_n)
-    begin
-      state        <= S_RX;
-      rx_shift     <= 24'h000000;
-      rx_count     <= 5'd0;
-      tx_shift     <= 16'h0000;
-      tx_count     <= 5'd0;
-      cmd_hold     <= 4'h0;
-      addr_hold    <= 4'h0;
-      wdata_hold   <= 16'h0000;
-      dbg_clk_sync <= 2'b00;
-      dbg_data_sync<= 2'b11;
-      dbg_data_out <= 1'b1;
-      dbg_data_oe  <= 1'b0;
-      reg_wr       <= 1'b0;
-      reg_addr     <= 4'h0;
-      reg_wdata    <= 16'h0000;
+    reg [3:0]  cmd_latched;
+    reg [3:0]  addr_latched;
+    reg [15:0] data_latched;
+
+    reg [15:0] tx_shift;
+    reg [4:0]  tx_count;
+
+    always @(posedge cpu_clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state        <= S_RX;
+            dbg_clk_sync <= 3'b000;
+            dbg_data_sync<= 2'b11;
+            dbg_data_out <= 1'b1;
+            dbg_data_oe  <= 1'b0;
+            reg_wr       <= 1'b0;
+            reg_addr     <= 4'h0;
+            reg_wdata    <= 16'h0000;
+            rx_shift     <= 24'h000000;
+            rx_count     <= 5'd0;
+            cmd_latched  <= 4'h0;
+            addr_latched <= 4'h0;
+            data_latched <= 16'h0000;
+            tx_shift     <= 16'h0000;
+            tx_count     <= 5'd0;
+        end else begin
+            dbg_clk_sync  <= {dbg_clk_sync[1:0], dbg_clk};
+            dbg_data_sync <= {dbg_data_sync[0], dbg_data_in};
+            reg_wr <= 1'b0;
+
+            case (state)
+                S_RX: begin
+                    dbg_data_oe <= 1'b0;
+                    dbg_data_out <= 1'b1;
+                    if (dbg_clk_rise) begin
+                        if (rx_count == 5'd23) begin
+                            cmd_latched  <= rx_shift[22:19];
+                            addr_latched <= rx_shift[18:15];
+                            data_latched <= {rx_shift[14:0], dbg_data_sync[1]};
+                            rx_count     <= 5'd0;
+                            state        <= S_EXEC;
+                        end else begin
+                            rx_shift <= {rx_shift[22:0], dbg_data_sync[1]};
+                            rx_count <= rx_count + 5'd1;
+                        end
+                    end
+                end
+
+                S_EXEC: begin
+                    reg_addr  <= addr_latched;
+                    reg_wdata <= data_latched;
+                    if (cmd_latched == CMD_WRITE)
+                        reg_wr <= 1'b1;
+                    state <= S_LOAD_TX;
+                end
+
+                S_LOAD_TX: begin
+                    if (cmd_latched == CMD_PING)
+                        tx_shift <= 16'hDB12;
+                    else if (cmd_latched == CMD_READ)
+                        tx_shift <= reg_rdata;
+                    else if (cmd_latched == CMD_WRITE)
+                        tx_shift <= 16'hACCE;
+                    else
+                        tx_shift <= 16'hEEEE;
+
+                    tx_count    <= 5'd0;
+                    dbg_data_oe <= 1'b0;
+                    dbg_data_out<= 1'b1;
+                    state       <= S_TURNAROUND;
+                end
+
+                S_TURNAROUND: begin
+                    dbg_data_oe <= 1'b0;
+                    if (dbg_clk_fall) begin
+                        dbg_data_oe  <= 1'b1;
+                        dbg_data_out <= tx_shift[15];
+                        state        <= S_TX;
+                    end
+                end
+
+                S_TX: begin
+                    if (dbg_clk_fall) begin
+                        if (tx_count == 5'd15) begin
+                            dbg_data_oe  <= 1'b0;
+                            dbg_data_out <= 1'b1;
+                            state        <= S_RX;
+                        end else begin
+                            tx_shift     <= {tx_shift[14:0], 1'b0};
+                            dbg_data_out <= tx_shift[14];
+                            tx_count     <= tx_count + 5'd1;
+                        end
+                    end
+                end
+
+                default: begin
+                    state <= S_RX;
+                    dbg_data_oe <= 1'b0;
+                    dbg_data_out <= 1'b1;
+                end
+            endcase
+        end
     end
-    else
-    begin
-      dbg_clk_sync  <= {dbg_clk_sync[0], dbg_clk};
-      dbg_data_sync <= {dbg_data_sync[0], dbg_data_in};
-      reg_wr        <= 1'b0;
-
-      case (state)
-        S_RX:
-        begin
-          dbg_data_oe  <= 1'b0;
-          dbg_data_out <= 1'b1;
-
-          if (dbg_clk_rise)
-          begin
-            if (rx_count == 5'd23)
-            begin
-              cmd_hold   <= rx_next[23:20];
-              addr_hold  <= rx_next[19:16];
-              wdata_hold <= rx_next[15:0];
-              rx_count   <= 5'd0;
-              state      <= S_EXEC;
-            end
-            else
-            begin
-              rx_shift <= rx_next;
-              rx_count <= rx_count + 5'd1;
-            end
-          end
-        end
-
-        S_EXEC:
-        begin
-          reg_addr  <= addr_hold;
-          reg_wdata <= wdata_hold;
-          if (cmd_hold == CMD_WRITE)
-            reg_wr <= 1'b1;
-          state <= S_LOAD_TX;
-        end
-
-        S_LOAD_TX:
-        begin
-          tx_shift     <= tx_word;
-          tx_count     <= 5'd0;
-          dbg_data_oe  <= 1'b0;
-          dbg_data_out <= 1'b1;
-
-          if (dbg_clk_fall)
-          begin
-            dbg_data_oe  <= 1'b1;
-            dbg_data_out <= tx_word[15];
-            state        <= S_TX;
-          end
-        end
-
-        S_TX:
-        begin
-          if (dbg_clk_fall)
-          begin
-            if (tx_count == 5'd15)
-            begin
-              dbg_data_oe  <= 1'b0;
-              dbg_data_out <= 1'b1;
-              state        <= S_RX;
-            end
-            else
-            begin
-              tx_shift     <= {tx_shift[14:0], 1'b0};
-              dbg_data_out <= tx_shift[14];
-              tx_count     <= tx_count + 5'd1;
-            end
-          end
-        end
-
-        default:
-        begin
-          state        <= S_RX;
-          dbg_data_oe  <= 1'b0;
-          dbg_data_out <= 1'b1;
-        end
-      endcase
-    end
-  end
 
 endmodule
+
+`default_nettype wire
 
 module cpu_cycle_controller_tiny
 (
@@ -1846,7 +1894,7 @@ module memory_wait_controller_tiny
 endmodule
 
 module debug_core_tiny
-(
+  (
     input  wire        clk,
     input  wire        rst_n,
 
@@ -1861,6 +1909,8 @@ module debug_core_tiny
     input  wire [2:0]  cpu_flags,
     input  wire [15:0] cpu_pc,
     input  wire [15:0] cpu_ir,
+    input  wire        instr_is_brk,
+    input wire         execute_now_pulse,
 
     // Debug control outputs
     output reg         dbg_enable,
@@ -1869,10 +1919,10 @@ module debug_core_tiny
     output reg         dbg_step_req,
     output reg         static_break_enable,
 
-    // One dynamic breakpoint only
-    output reg  [15:0] bp0,
-    output reg         bp_enable
-);
+
+    output wire        dbg_break_hit,
+    output wire        dbg_break_after_exec
+  );
 
   localparam REG_ID      = 4'h0;
   localparam REG_STATUS  = 4'h1;
@@ -1882,6 +1932,18 @@ module debug_core_tiny
   localparam REG_IR      = 4'h5;
   localparam REG_BP0     = 4'h8;
   localparam REG_BPCTRL  = 4'h9;
+  // One dynamic breakpoint only
+  reg  [15:0] bp0;
+  reg         bp_enable;
+  reg bp_resume_mask;
+  wire resume_cmd;
+  wire bp_raw_hit;
+
+  assign resume_cmd = dbg_run_req | dbg_step_req;
+  assign bp_raw_hit = dbg_enable & bp_enable & (cpu_pc == bp0);
+
+  assign dbg_break_hit = bp_raw_hit & ~bp_resume_mask;
+  assign dbg_break_after_exec = dbg_enable & static_break_enable & instr_is_brk;
 
   always @(posedge clk or negedge rst_n)
   begin
@@ -1990,50 +2052,15 @@ module debug_core_tiny
     endcase
   end
 
-endmodule
-
-module breakpoint_logic_tiny
-(
-    input  wire        clk,
-    input  wire        rst_n,
-
-    input  wire        dbg_enable,
-    input  wire        dbg_halted,
-    input  wire        dbg_run_req,
-    input  wire        dbg_step_req,
-    input  wire        execute_now_pulse,
-
-    input  wire [15:0] pc,
-    input  wire [15:0] bp0,
-    input  wire        bp_enable,
-
-    input  wire        instr_is_brk,
-    input  wire        static_break_enable,
-
-    output wire        dbg_break_hit,
-    output wire        dbg_break_after_exec
-);
-
-    reg bp_resume_mask;
-    wire resume_cmd;
-    wire bp_raw_hit;
-
-    assign resume_cmd = dbg_run_req | dbg_step_req;
-    assign bp_raw_hit = dbg_enable & bp_enable & (pc == bp0);
-
-    assign dbg_break_hit = bp_raw_hit & ~bp_resume_mask;
-    assign dbg_break_after_exec = dbg_enable & static_break_enable & instr_is_brk;
-
-    always @(posedge clk or negedge rst_n)
-    begin
-        if (!rst_n)
-            bp_resume_mask <= 1'b0;
-        else if (execute_now_pulse)
-            bp_resume_mask <= 1'b0;
-        else if (dbg_halted & resume_cmd)
-            bp_resume_mask <= 1'b1;
-    end
-
+  always @(posedge clk or negedge rst_n)
+  begin
+    if (!rst_n)
+      bp_resume_mask <= 1'b0;
+    else if (execute_now_pulse)
+      bp_resume_mask <= 1'b0;
+    else if (cpu_dbg_halted & resume_cmd)
+      bp_resume_mask <= 1'b1;
+  end
 endmodule
 
 module DIG_Add
@@ -2163,79 +2190,79 @@ assign {
 
 always @(*) begin
     case (opcode)
-        7'b0000000: ctrl = 26'b0000_0000_0000_0000_0000_00000_1;//8'hx00:
-        7'b0000001: ctrl = 26'b0000_0000_0100_0000_1000_00000_1;//8'hx01:
-        7'b0000010: ctrl = 26'b0000_0000_1110_0000_0000_00000_1;//8'hx02:
-        7'b0000011: ctrl = 26'b0001_0000_1110_0000_0000_00000_1;//8'hx03:
-        7'b0000100: ctrl = 26'b0000_0001_0110_0000_0000_00000_1;//8'hx04:
-        7'b0000101: ctrl = 26'b0001_0001_0110_0000_0000_00000_1;//8'hx05:
-        7'b0000110: ctrl = 26'b0000_0001_1110_0000_0000_00000_1;//8'hx06:
-        7'b0000111: ctrl = 26'b0000_0010_0110_0000_0000_00000_1;//8'hx07:
-        7'b0001000: ctrl = 26'b0000_0010_1110_0000_0000_00000_1;//8'hx08:
-        7'b0001001: ctrl = 26'b0100_0000_0101_0000_0000_00000_1;//8'hx09:
-        7'b0001010: ctrl = 26'b1010_0000_0100_0000_0000_00000_1;//8'hx0A:
-        7'b0001011: ctrl = 26'b0100_0000_1111_0000_0000_00000_1;//8'hx0B:
-        7'b0001100: ctrl = 26'b1010_0000_1110_0000_0000_00000_1;//8'hx0C:
-        7'b0001101: ctrl = 26'b0101_0000_1111_0000_0000_00000_1;//8'hx0D:
-        7'b0001110: ctrl = 26'b1011_0000_1110_0000_0000_00000_1;//8'hx0E:
-        7'b0001111: ctrl = 26'b0100_0001_0111_0000_0000_00000_1;//8'hx0F:
-        7'b0010000: ctrl = 26'b1010_0001_0110_0000_0000_00000_1;//8'hx10:
-        7'b0010001: ctrl = 26'b0101_0001_0111_0000_0000_00000_1;//8'hx11:
-        7'b0010010: ctrl = 26'b1011_0001_0110_0000_0000_00000_1;//8'hx12:
-        7'b0010011: ctrl = 26'b0000_0011_1100_0000_0000_00000_1;//8'hx13:
-        7'b0010100: ctrl = 26'b0100_0001_1111_0000_0000_00000_1;//8'hx14:
-        7'b0010101: ctrl = 26'b1010_0001_1110_0000_0000_00000_1;//8'hx15:
-        7'b0010110: ctrl = 26'b0100_0010_0111_0000_0000_00000_1;//8'hx16:
-        7'b0010111: ctrl = 26'b1010_0010_0110_0000_0000_00000_1;//8'hx17:
-        7'b0011000: ctrl = 26'b0100_0010_1111_0000_0000_00000_1;//8'hx18:
-        7'b0011001: ctrl = 26'b1010_0010_1110_0000_0000_00000_1;//8'hx19:
-        7'b0011010: ctrl = 26'b0000_0011_0100_0000_0000_00000_1;//8'hx1A:
-        //17'b0011011:ctrl =58'b0000_0110_1110_0000_0000_00000;//8'hx1B:
-        //17'b0011100:ctrl =58'b0100_0110_1111_0000_0000_00000;//8'hx1C:
-        //17'b0011101:ctrl =58'b1010_0110_1110_0000_0000_00000;//8'hx1D:
-        7'b0011110: ctrl = 26'b0000_0001_0010_0000_0000_00000_1;//8'hx1E:
-        7'b0011111: ctrl = 26'b0001_0001_0010_0000_0000_00000_1;//8'hx1F:
-        7'b0100000: ctrl = 26'b0100_0001_0011_0000_0000_00000_1;//8'hx20:
-        7'b0100001: ctrl = 26'b1010_0001_0010_0000_0000_00000_1;//8'hx21:
-        7'b0100010: ctrl = 26'b0101_0001_0011_0000_0000_00000_1;//8'hx22:
-        7'b0100011: ctrl = 26'b1011_0001_0010_0000_0000_00000_1;//8'hx23:
-        7'b0100100: ctrl = 26'b0000_0100_0110_0000_0000_00000_1;//8'hx24:
-        7'b0100101: ctrl = 26'b0000_0100_1110_0000_0000_00000_1;//8'hx25:
-        7'b0100110: ctrl = 26'b0001_0100_0110_0000_0000_00000_1;//8'hx26:
-        7'b0100111: ctrl = 26'b0001_0100_1110_0000_0000_00000_1;//8'hx27:
-        7'b0101000: ctrl = 26'b0000_0101_0110_0000_0000_00000_1;//8'hx28:
-        7'b0101001: ctrl = 26'b0000_0101_1100_0000_0000_00000_1;//8'hx29:
-        7'b0101010: ctrl = 26'b0000_0110_0100_0000_0000_00000_1;//8'hx2A:
-        7'b0101011: ctrl = 26'b0110_0000_1000_0000_0010_00000_1;//8'hx2B:
-        7'b0101100: ctrl = 26'b0110_0000_1100_0000_1100_00000_1;//8'hx2C:
-        7'b0101101: ctrl = 26'b0100_0000_0001_1000_0010_00000_1;//8'hx2D:
-        7'b0101110: ctrl = 26'b1110_0000_0000_0000_0010_00000_1;//8'hx2E:
-        7'b0101111: ctrl = 26'b0100_0000_0101_0000_0100_00000_1;//8'hx2F:
-        7'b0110000: ctrl = 26'b1010_0000_0100_0000_0100_00000_1;//8'hx30:
-        7'b0110001: ctrl = 26'b0100_0000_1000_0000_0010_00000_1;//8'hx31:
-        7'b0110010: ctrl = 26'b0100_0000_1100_0000_1100_00000_1;//8'hx32:
-        7'b0110011: ctrl = 26'b0010_0000_0100_0000_0000_00000_1;//8'hx33:
-        7'b0110100: ctrl = 26'b0100_0000_0001_0001_0000_00000_1;//8'hx34:
-        7'b0110101: ctrl = 26'b0100_0000_0001_0010_0000_00000_1;//8'hx35:
-        7'b0110110: ctrl = 26'b0100_0000_0001_0011_0000_00000_1;//8'hx36:
-        7'b0110111: ctrl = 26'b0100_0000_0001_0101_0000_00000_1;//8'hx37:
-        7'b0111000: ctrl = 26'b0100_0000_0001_0110_0000_00000_1;//8'hx38:
-        7'b0111001: ctrl = 26'b0100_0000_0001_0111_0000_00000_1;//8'hx39:
-        7'b0111010: ctrl = 26'b0100_0000_0101_0000_0001_00100_1;//8'hx3A:
-        7'b0111011: ctrl = 26'b0000_0000_0000_0000_0001_00000_1;//8'hx3B:
-        7'b0111100: ctrl = 26'b0100_0000_0001_0000_0001_00000_1;//8'hx3C:
-        7'b0111101: ctrl = 26'b1100_0000_0000_0100_0000_00000_1;//8'hx3D:
-        7'b0111110: ctrl = 26'b0100_0000_0001_1000_0000_10000_1;//8'hx3E:
-        7'b0111111: ctrl = 26'b1110_0000_0000_0000_0000_10000_1;//8'hx3F:
-        7'b1000000: ctrl = 26'b0110_0000_1000_0000_0000_10000_1;//8'hx40:
-        7'b1000001: ctrl = 26'b0100_0000_0101_0000_1000_01000_1;//8'hx41:
-        7'b1000010: ctrl = 26'b1010_0000_0100_0000_1000_01000_1;//8'hx42:
-        7'b1000011: ctrl = 26'b0110_0000_1100_0000_1000_01000_1;//8'hx43:
-        7'b1000100: ctrl = 26'b0000_0000_0000_0000_0001_00010_1;//8'hx44:
-        7'b1000101: ctrl = 26'b0110_0000_1100_0000_1000_00001_1;//8'hx45:
-        7'b1000110: ctrl = 26'b0100_0000_0101_0000_0000_00001_1;//8'hx46:
-        7'b1000111: ctrl = 26'b1010_0000_0100_0000_0000_00001_1;//8'hx47:
-        7'b1001000: ctrl = 26'b0100_0000_1100_0000_1000_00001_1;//8'hx48:
+        7'b0000000: ctrl = 26'b0000_0000_0000_0000_0000_00000_0;//8'hx00:
+        7'b0000001: ctrl = 26'b0000_0000_0100_0000_1000_00000_0;//8'hx01:
+        7'b0000010: ctrl = 26'b0000_0000_1110_0000_0000_00000_0;//8'hx02:
+        7'b0000011: ctrl = 26'b0001_0000_1110_0000_0000_00000_0;//8'hx03:
+        7'b0000100: ctrl = 26'b0000_0001_0110_0000_0000_00000_0;//8'hx04:
+        7'b0000101: ctrl = 26'b0001_0001_0110_0000_0000_00000_0;//8'hx05:
+        7'b0000110: ctrl = 26'b0000_0001_1110_0000_0000_00000_0;//8'hx06:
+        7'b0000111: ctrl = 26'b0000_0010_0110_0000_0000_00000_0;//8'hx07:
+        7'b0001000: ctrl = 26'b0000_0010_1110_0000_0000_00000_0;//8'hx08:
+        7'b0001001: ctrl = 26'b0100_0000_0101_0000_0000_00000_0;//8'hx09:
+        7'b0001010: ctrl = 26'b1010_0000_0100_0000_0000_00000_0;//8'hx0A:
+        7'b0001011: ctrl = 26'b0100_0000_1111_0000_0000_00000_0;//8'hx0B:
+        7'b0001100: ctrl = 26'b1010_0000_1110_0000_0000_00000_0;//8'hx0C:
+        7'b0001101: ctrl = 26'b0101_0000_1111_0000_0000_00000_0;//8'hx0D:
+        7'b0001110: ctrl = 26'b1011_0000_1110_0000_0000_00000_0;//8'hx0E:
+        7'b0001111: ctrl = 26'b0100_0001_0111_0000_0000_00000_0;//8'hx0F:
+        7'b0010000: ctrl = 26'b1010_0001_0110_0000_0000_00000_0;//8'hx10:
+        7'b0010001: ctrl = 26'b0101_0001_0111_0000_0000_00000_0;//8'hx11:
+        7'b0010010: ctrl = 26'b1011_0001_0110_0000_0000_00000_0;//8'hx12:
+        7'b0010011: ctrl = 26'b0000_0011_1100_0000_0000_00000_0;//8'hx13:
+        7'b0010100: ctrl = 26'b0100_0001_1111_0000_0000_00000_0;//8'hx14:
+        7'b0010101: ctrl = 26'b1010_0001_1110_0000_0000_00000_0;//8'hx15:
+        7'b0010110: ctrl = 26'b0100_0010_0111_0000_0000_00000_0;//8'hx16:
+        7'b0010111: ctrl = 26'b1010_0010_0110_0000_0000_00000_0;//8'hx17:
+        7'b0011000: ctrl = 26'b0100_0010_1111_0000_0000_00000_0;//8'hx18:
+        7'b0011001: ctrl = 26'b1010_0010_1110_0000_0000_00000_0;//8'hx19:
+        7'b0011010: ctrl = 26'b0000_0011_0100_0000_0000_00000_0;//8'hx1A:
+        //17'b0011011:ctrl =58'b0000_0110_1110_0000_0000_000000//8'hx1B:
+        //17'b0011100:ctrl =58'b0100_0110_1111_0000_0000_000000//8'hx1C:
+        //17'b0011101:ctrl =58'b1010_0110_1110_0000_0000_000000//8'hx1D:
+        7'b0011110: ctrl = 26'b0000_0001_0010_0000_0000_00000_0;//8'hx1E:
+        7'b0011111: ctrl = 26'b0001_0001_0010_0000_0000_00000_0;//8'hx1F:
+        7'b0100000: ctrl = 26'b0100_0001_0011_0000_0000_00000_0;//8'hx20:
+        7'b0100001: ctrl = 26'b1010_0001_0010_0000_0000_00000_0;//8'hx21:
+        7'b0100010: ctrl = 26'b0101_0001_0011_0000_0000_00000_0;//8'hx22:
+        7'b0100011: ctrl = 26'b1011_0001_0010_0000_0000_00000_0;//8'hx23:
+        7'b0100100: ctrl = 26'b0000_0100_0110_0000_0000_00000_0;//8'hx24:
+        7'b0100101: ctrl = 26'b0000_0100_1110_0000_0000_00000_0;//8'hx25:
+        7'b0100110: ctrl = 26'b0001_0100_0110_0000_0000_00000_0;//8'hx26:
+        7'b0100111: ctrl = 26'b0001_0100_1110_0000_0000_00000_0;//8'hx27:
+        7'b0101000: ctrl = 26'b0000_0101_0110_0000_0000_00000_0;//8'hx28:
+        7'b0101001: ctrl = 26'b0000_0101_1100_0000_0000_00000_0;//8'hx29:
+        7'b0101010: ctrl = 26'b0000_0110_0100_0000_0000_00000_0;//8'hx2A:
+        7'b0101011: ctrl = 26'b0110_0000_1000_0000_0010_00000_0;//8'hx2B:
+        7'b0101100: ctrl = 26'b0110_0000_1100_0000_1100_00000_0;//8'hx2C:
+        7'b0101101: ctrl = 26'b0100_0000_0001_1000_0010_00000_0;//8'hx2D:
+        7'b0101110: ctrl = 26'b1110_0000_0000_0000_0010_00000_0;//8'hx2E:
+        7'b0101111: ctrl = 26'b0100_0000_0101_0000_0100_00000_0;//8'hx2F:
+        7'b0110000: ctrl = 26'b1010_0000_0100_0000_0100_00000_0;//8'hx30:
+        7'b0110001: ctrl = 26'b0100_0000_1000_0000_0010_00000_0;//8'hx31:
+        7'b0110010: ctrl = 26'b0100_0000_1100_0000_1100_00000_0;//8'hx32:
+        7'b0110011: ctrl = 26'b0010_0000_0100_0000_0000_00000_0;//8'hx33:
+        7'b0110100: ctrl = 26'b0100_0000_0001_0001_0000_00000_0;//8'hx34:
+        7'b0110101: ctrl = 26'b0100_0000_0001_0010_0000_00000_0;//8'hx35:
+        7'b0110110: ctrl = 26'b0100_0000_0001_0011_0000_00000_0;//8'hx36:
+        7'b0110111: ctrl = 26'b0100_0000_0001_0101_0000_00000_0;//8'hx37:
+        7'b0111000: ctrl = 26'b0100_0000_0001_0110_0000_00000_0;//8'hx38:
+        7'b0111001: ctrl = 26'b0100_0000_0001_0111_0000_00000_0;//8'hx39:
+        7'b0111010: ctrl = 26'b0100_0000_0101_0000_0001_00100_0;//8'hx3A:
+        7'b0111011: ctrl = 26'b0000_0000_0000_0000_0001_00000_0;//8'hx3B:
+        7'b0111100: ctrl = 26'b0100_0000_0001_0000_0001_00000_0;//8'hx3C:
+        7'b0111101: ctrl = 26'b1100_0000_0000_0100_0000_00000_0;//8'hx3D:
+        7'b0111110: ctrl = 26'b0100_0000_0001_1000_0000_10000_0;//8'hx3E:
+        7'b0111111: ctrl = 26'b1110_0000_0000_0000_0000_10000_0;//8'hx3F:
+        7'b1000000: ctrl = 26'b0110_0000_1000_0000_0000_10000_0;//8'hx40:
+        7'b1000001: ctrl = 26'b0100_0000_0101_0000_1000_01000_0;//8'hx41:
+        7'b1000010: ctrl = 26'b1010_0000_0100_0000_1000_01000_0;//8'hx42:
+        7'b1000011: ctrl = 26'b0110_0000_1100_0000_1000_01000_0;//8'hx43:
+        7'b1000100: ctrl = 26'b0000_0000_0000_0000_0001_00010_0;//8'hx44:
+        7'b1000101: ctrl = 26'b0110_0000_1100_0000_1000_00001_0;//8'hx45:
+        7'b1000110: ctrl = 26'b0100_0000_0101_0000_0000_00001_0;//8'hx46:
+        7'b1000111: ctrl = 26'b1010_0000_0100_0000_0000_00001_0;//8'hx47:
+        7'b1001000: ctrl = 26'b0100_0000_1100_0000_1000_00001_0;//8'hx48:
         7'b1001001: ctrl = 26'b0000_0000_0000_0000_1000_00000_1;//8'hx49:
 
         default:    ctrl = 26'b0000_0000_0000_0000_0000_00000;
@@ -2261,278 +2288,124 @@ module muxEncoder
   end
 endmodule
 
-
-module DIG_Neg #(
-    parameter Bits = 1
-)
-(
-      input signed [(Bits-1):0] in,
-      output signed [(Bits-1):0] out
-);
-    assign out = -in;
-endmodule
-
-
-module DIG_Sub #(
-    parameter Bits = 2
-)
-(
-    input [(Bits-1):0] a,
-    input [(Bits-1):0] b,
-    input c_i,
-    output [(Bits-1):0] s,
-    output c_o
-);
-    wire [Bits:0] temp;
-
-    assign temp = a - b - c_i;
-    assign s = temp[(Bits-1):0];
-    assign c_o = temp[Bits];
-endmodule
-
-
-module Mux_16x1_NBits #(
-    parameter Bits = 2
-)
-(
-    input [3:0] sel,
-    input [(Bits - 1):0] in_0,
-    input [(Bits - 1):0] in_1,
-    input [(Bits - 1):0] in_2,
-    input [(Bits - 1):0] in_3,
-    input [(Bits - 1):0] in_4,
-    input [(Bits - 1):0] in_5,
-    input [(Bits - 1):0] in_6,
-    input [(Bits - 1):0] in_7,
-    input [(Bits - 1):0] in_8,
-    input [(Bits - 1):0] in_9,
-    input [(Bits - 1):0] in_10,
-    input [(Bits - 1):0] in_11,
-    input [(Bits - 1):0] in_12,
-    input [(Bits - 1):0] in_13,
-    input [(Bits - 1):0] in_14,
-    input [(Bits - 1):0] in_15,
-    output reg [(Bits - 1):0] out
-);
-    always @ (*) begin
-        case (sel)
-            4'h0: out = in_0;
-            4'h1: out = in_1;
-            4'h2: out = in_2;
-            4'h3: out = in_3;
-            4'h4: out = in_4;
-            4'h5: out = in_5;
-            4'h6: out = in_6;
-            4'h7: out = in_7;
-            4'h8: out = in_8;
-            4'h9: out = in_9;
-            4'ha: out = in_10;
-            4'hb: out = in_11;
-            4'hc: out = in_12;
-            4'hd: out = in_13;
-            4'he: out = in_14;
-            4'hf: out = in_15;
-            default:
-                out = 'h0;
-        endcase
-    end
-endmodule
-
-
-module Mux_16x1
-(
-    input [3:0] sel,
-    input in_0,
-    input in_1,
-    input in_2,
-    input in_3,
-    input in_4,
-    input in_5,
-    input in_6,
-    input in_7,
-    input in_8,
-    input in_9,
-    input in_10,
-    input in_11,
-    input in_12,
-    input in_13,
-    input in_14,
-    input in_15,
-    output reg out
-);
-    always @ (*) begin
-        case (sel)
-            4'h0: out = in_0;
-            4'h1: out = in_1;
-            4'h2: out = in_2;
-            4'h3: out = in_3;
-            4'h4: out = in_4;
-            4'h5: out = in_5;
-            4'h6: out = in_6;
-            4'h7: out = in_7;
-            4'h8: out = in_8;
-            4'h9: out = in_9;
-            4'ha: out = in_10;
-            4'hb: out = in_11;
-            4'hc: out = in_12;
-            4'hd: out = in_13;
-            4'he: out = in_14;
-            4'hf: out = in_15;
-            default:
-                out = 'h0;
-        endcase
-    end
-endmodule
-
-module or_signal
-  (
-    input [15:0]D,
-    output O
-  );
-
- 
-
-  assign O = ~|D;
-
-
-endmodule
-
 module Alu (
-  input [15:0] A,
-  input [15:0] B,
-  input carryIn,
-  input [5:0] AluOp,
-  output [15:0] Out,
-  output Neg,
-  output Zero,
-  output CarryOut
-);
-  wire [3:0] s0;
-  wire [15:0] s1;
-  wire [15:0] s2;
-  wire [15:0] s3;
-  wire [15:0] s4;
-  wire [15:0] s5;
-  wire [15:0] s6;
-  wire [15:0] s7;
-  wire [15:0] s8;
-  wire [15:0] s9;
-  wire [15:0] s10;
-  wire [15:0] s11;
-  wire [15:0] s12;
-  wire [15:0] Out_temp;
-  wire [3:0] s13;
-  wire s14;
-  wire s15;
-  wire s16;
-  wire s17;
-  wire s18;
-  wire [4:0] sel;
-  wire s19;
-  wire s20;
-  assign s3 = (A & B);
-  assign s4 = (A | B);
-  assign s5 = (A ^ B);
-  assign s19 = (AluOp[5] & carryIn);
-  assign s6 = ~ A;
-  DIG_Neg #(
-    .Bits(16)
-  )
-  DIG_Neg_i0 (
-    .in( A ),
-    .out( s7 )
+    input [15:0] A,
+    input [15:0] B,
+    input carryIn,
+    input [5:0] AluOp,
+    output [15:0] Out,
+    output Neg,
+    output Zero,
+    output CarryOut
   );
-  assign s12[3:0] = A[7:4];
-  assign s12[7:4] = A[3:0];
-  assign s12[11:8] = A[15:12];
-  assign s12[15:12] = A[11:8];
-  assign s11[7:0] = A[15:8];
-  assign s11[15:8] = A[7:0];
-  assign sel = AluOp[4:0];
-  assign s18 = A[0];
-  assign s20 = A[15];
-  assign s17 = A[0];
-  assign s16 = A[15];
-  DIG_Add #(
-    .Bits(16)
-  )
-  DIG_Add_i1 (
-    .a( A ),
-    .b( B ),
-    .c_i( s19 ),
-    .s( s1 ),
-    .c_o( s14 )
-  );
-  DIG_Sub #(
-    .Bits(16)
-  )
-  DIG_Sub_i2 (
-    .a( A ),
-    .b( B ),
-    .c_i( s19 ),
-    .s( s2 ),
-    .c_o( s15 )
-  );
-  assign s10[13:0] = A[14:1];
-  assign s10[14] = s20;
-  assign s10[15] = s20;
-  assign s9[14:0] = A[15:1];
-  assign s9[15] = s19;
-  assign s8[0] = s19;
-  assign s8[15:1] = A[14:0];
-  assign s13 = sel[3:0];
-  assign s0 = sel[3:0];
-  Mux_16x1_NBits #(
-    .Bits(16)
-  )
-  Mux_16x1_NBits_i3 (
-    .sel( s0 ),
-    .in_0( B ),
-    .in_1( s1 ),
-    .in_2( s2 ),
-    .in_3( s3 ),
-    .in_4( s4 ),
-    .in_5( s5 ),
-    .in_6( s6 ),
-    .in_7( s7 ),
-    .in_8( s8 ),
-    .in_9( s9 ),
-    .in_10( s10 ),
-    .in_11( s11 ),
-    .in_12( s12 ),
-    .in_13( A ),
-    .in_14( 16'b0 ),
-    .in_15( 16'b0 ),
-    .out( Out_temp )
-  );
-  Mux_16x1 Mux_16x1_i4 (
-    .sel( s13 ),
-    .in_0( 1'b0 ),
-    .in_1( s14 ),
-    .in_2( s15 ),
-    .in_3( 1'b0 ),
-    .in_4( 1'b0 ),
-    .in_5( 1'b0 ),
-    .in_6( 1'b0 ),
-    .in_7( 1'b0 ),
-    .in_8( s16 ),
-    .in_9( s17 ),
-    .in_10( s18 ),
-    .in_11( 1'b0 ),
-    .in_12( 1'b0 ),
-    .in_13( 1'b0 ),
-    .in_14( 1'b0 ),
-    .in_15( 1'b0 ),
-    .out( CarryOut )
-  );
-  // or_signal
-  or_signal or_signal_i5 (
-    .D( Out_temp ),
-    .O( Zero )
-  );
-  assign Neg = Out_temp[15];
-  assign Out = Out_temp;
+  wire use_carry;
+  wire [3:0] sel;
+  reg  [15:0] out_r;
+  reg         carry_r;
+  reg  [16:0] math_ext;
+
+  assign use_carry = AluOp[5] & carryIn;
+  assign sel = AluOp[3:0];
+
+  always @(*)
+  begin
+    out_r   = 16'h0000;
+    carry_r = 1'b0;
+    math_ext = 17'h00000;
+
+    case (sel)
+      4'h0:
+      begin
+        out_r = B;
+      end
+
+      4'h1:
+      begin
+        math_ext = {1'b0, A} + {1'b0, B} + {{16{1'b0}}, use_carry};
+        out_r    = math_ext[15:0];
+        carry_r  = math_ext[16];
+      end
+
+      4'h2:
+      begin
+        math_ext = {1'b0, A} - {1'b0, B} - {{16{1'b0}}, use_carry};
+        out_r    = math_ext[15:0];
+        carry_r  = math_ext[16];
+      end
+
+      4'h3:
+      begin
+        out_r = A & B;
+      end
+
+      4'h4:
+      begin
+        out_r = A | B;
+      end
+
+      4'h5:
+      begin
+        out_r = A ^ B;
+      end
+
+      4'h6:
+      begin
+        out_r = ~A;
+      end
+
+      4'h7:
+      begin
+        math_ext = {1'b0, 16'h0000} - {1'b0, A};
+        out_r    = math_ext[15:0];
+      end
+
+      4'h8:
+      begin
+        out_r   = {A[14:0], use_carry};
+        carry_r = A[15];
+      end
+
+      4'h9:
+      begin
+        out_r   = {use_carry, A[15:1]};
+        carry_r = A[0];
+      end
+
+      4'hA:
+      begin
+        out_r   = {A[15], A[15], A[14:1]};
+        carry_r = A[0];
+      end
+
+      4'hB:
+      begin
+        out_r = {A[7:0], A[15:8]};
+      end
+
+      4'hC:
+      begin
+        out_r = {A[11:8], A[15:12], A[3:0], A[7:4]};
+      end
+
+      4'hD:
+      begin
+        out_r = A;
+      end
+
+      default:
+      begin
+        out_r   = 16'h0000;
+        carry_r = 1'b0;
+      end
+    endcase
+  end
+
+  assign Out      = out_r;
+  assign CarryOut = carry_r;
+  assign Neg      = out_r[15];
+  assign Zero     = ~|out_r;
 endmodule
+
 
 module Mux_4x1_NBits #(
     parameter Bits = 2
@@ -2558,7 +2431,7 @@ module Mux_4x1_NBits #(
 endmodule
 
 
-module CompSigned #(
+module CompUnsigned #(
     parameter Bits = 1
 )
 (
@@ -2568,9 +2441,9 @@ module CompSigned #(
     output \= ,
     output \<
 );
-    assign \> = $signed(a) > $signed(b);
-    assign \= = $signed(a) == $signed(b);
-    assign \< = $signed(a) < $signed(b);
+    assign \> = a > b;
+    assign \= = a == b;
+    assign \< = a < b;
 endmodule
 
 
@@ -2737,16 +2610,12 @@ module tt_um_remedy_cpu (
   wire fetch_request_pulse;
   wire dbg_halted;
   wire ststic_break_en;
-  wire [15:0] bp0;
-  wire bp_en;
   Mux_2x1 Mux_2x1_i0 (
     .sel( ena ),
     .in_0( 1'b1 ),
     .in_1( clk ),
     .out( s19 )
   );
-  assign inputFromOutside[6:0] = ui_in[6:0];
-  assign inputFromOutside[7] = 1'b0;
   assign spi_miso = uio_in[0];
   assign s53 = uio_in[1];
   assign s54 = uio_in[2];
@@ -2756,6 +2625,8 @@ module tt_um_remedy_cpu (
   assign \scl-in  = uio_in[6];
   assign dbg_data_in = uio_in[7];
   assign dbg_clk = ui_in[7];
+  assign inputFromOutside[6:0] = ui_in[6:0];
+  assign inputFromOutside[7] = dbg_clk;
   assign inputReg[0] = inputFromOutside[0];
   assign inputReg[1] = inputFromOutside[1];
   assign inputReg[2] = inputFromOutside[2];
@@ -3007,28 +2878,13 @@ module tt_um_remedy_cpu (
     .cpu_flags( flag_out ),
     .cpu_pc( programAddr ),
     .cpu_ir( inst_reg ),
+    .instr_is_brk( Break ),
+    .execute_now_pulse( \execute-pulse  ),
     .reg_rdata( reg_rdata ),
     .dbg_enable( dbg_en ),
     .dbg_halt_req( halt_req ),
     .dbg_run_req( run_req ),
     .dbg_step_req( step_req ),
-    .static_break_enable( ststic_break_en ),
-    .bp0( bp0 ),
-    .bp_enable( bp_en )
-  );
-  // breakpoint_logic_tiny
-  breakpoint_logic_tiny breakpoint_logic_tiny_i20 (
-    .clk( s19 ),
-    .rst_n( rst_n ),
-    .dbg_enable( dbg_en ),
-    .dbg_halted( dbg_halted ),
-    .dbg_run_req( run_req ),
-    .dbg_step_req( step_req ),
-    .execute_now_pulse( \execute-pulse  ),
-    .pc( programAddr ),
-    .bp0( bp0 ),
-    .bp_enable( bp_en ),
-    .instr_is_brk( Break ),
     .static_break_enable( ststic_break_en ),
     .dbg_break_hit( s82 ),
     .dbg_break_after_exec( s83 )
@@ -3047,7 +2903,7 @@ module tt_um_remedy_cpu (
   assign s58[0] = s59;
   assign s58[1] = s60;
   assign s58[2] = i2c_inter;
-  Mux_2x1 Mux_2x1_i21 (
+  Mux_2x1 Mux_2x1_i20 (
     .sel( spi_target ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
@@ -3061,7 +2917,7 @@ module tt_um_remedy_cpu (
   DIG_Add #(
     .Bits(16)
   )
-  DIG_Add_i22 (
+  DIG_Add_i21 (
     .a( programAddr ),
     .b( 16'b1 ),
     .c_i( 1'b0 ),
@@ -3075,13 +2931,13 @@ module tt_um_remedy_cpu (
   assign s62 = s1[8:0];
   assign s61 = s1[7:0];
   assign s57 = s1[3:0];
-  singExtend singExtend_i23 (
+  singExtend singExtend_i22 (
     .inst( s18 ),
     .\4S ( s3 ),
     .\8SD ( s4 ),
     .\4D ( s5 )
   );
-  Mux_2x1 Mux_2x1_i24 (
+  Mux_2x1 Mux_2x1_i23 (
     .sel( s67 ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
@@ -3092,7 +2948,7 @@ module tt_um_remedy_cpu (
   Mux_2x1_NBits #(
     .Bits(7)
   )
-  Mux_2x1_NBits_i25 (
+  Mux_2x1_NBits_i24 (
     .sel( imm ),
     .in_0( s20 ),
     .in_1( 7'b0 ),
@@ -3107,7 +2963,7 @@ module tt_um_remedy_cpu (
   assign uio_out[6] = scl_o;
   assign uio_out[7] = dbg_data_out;
   // opcode_microcode_rom
-  opcode_microcode_rom opcode_microcode_rom_i26 (
+  opcode_microcode_rom opcode_microcode_rom_i25 (
     .opcode( s21 ),
     .muxb0( s24 ),
     .muxb1( s23 ),
@@ -3139,7 +2995,7 @@ module tt_um_remedy_cpu (
   Mux_2x1_NBits #(
     .Bits(16)
   )
-  Mux_2x1_NBits_i27 (
+  Mux_2x1_NBits_i26 (
     .sel( muxA ),
     .in_0( s0 ),
     .in_1( s1 ),
@@ -3172,7 +3028,7 @@ module tt_um_remedy_cpu (
   Mux_8x1_NBits #(
     .Bits(16)
   )
-  Mux_8x1_NBits_i28 (
+  Mux_8x1_NBits_i27 (
     .sel( muxB ),
     .in_0( s1 ),
     .in_1( 16'b0 ),
@@ -3185,7 +3041,7 @@ module tt_um_remedy_cpu (
     .out( s6 )
   );
   // muxEncoder
-  muxEncoder muxEncoder_i29 (
+  muxEncoder muxEncoder_i28 (
     .a( 1'b0 ),
     .b( s47 ),
     .c( s48 ),
@@ -3193,7 +3049,7 @@ module tt_um_remedy_cpu (
     .Q( s9 )
   );
   assign s13 = br[1:0];
-  Mux_4x1 Mux_4x1_i30 (
+  Mux_4x1 Mux_4x1_i29 (
     .sel( s13 ),
     .in_0( 1'b0 ),
     .in_1( s14 ),
@@ -3201,7 +3057,8 @@ module tt_um_remedy_cpu (
     .in_3( s16 ),
     .out( s17 )
   );
-  Alu Alu_i31 (
+  // Alu
+  Alu Alu_i30 (
     .A( s2 ),
     .B( s6 ),
     .carryIn( s14 ),
@@ -3214,7 +3071,7 @@ module tt_um_remedy_cpu (
   Mux_4x1_NBits #(
     .Bits(16)
   )
-  Mux_4x1_NBits_i32 (
+  Mux_4x1_NBits_i31 (
     .sel( s9 ),
     .in_0( s10 ),
     .in_1( mem_out ),
@@ -3222,10 +3079,10 @@ module tt_um_remedy_cpu (
     .in_3( s11 ),
     .out( s12 )
   );
-  CompSigned #(
+  CompUnsigned #(
     .Bits(16)
   )
-  CompSigned_i33 (
+  CompUnsigned_i32 (
     .a( s10 ),
     .b( 16'b1 ),
     .\= ( s38 )
