@@ -1427,7 +1427,7 @@ module i2c_master_ctrl (
 
 endmodule
 
-
+`default_nettype none
 
 module debug_serial_frontend_tiny
 (
@@ -1439,9 +1439,9 @@ module debug_serial_frontend_tiny
     output reg         dbg_data_out,
     output reg         dbg_data_oe,
 
-    output reg         reg_wr,
-    output reg  [3:0]  reg_addr,
-    output reg  [15:0] reg_wdata,
+    output wire        reg_wr,
+    output wire [3:0]  reg_addr,
+    output wire [15:0] reg_wdata,
     input  wire [15:0] reg_rdata
 );
 
@@ -1469,12 +1469,15 @@ module debug_serial_frontend_tiny
     reg [23:0] rx_shift;
     reg [4:0]  rx_count;
 
-    reg [3:0]  cmd_latched;
-    reg [3:0]  addr_latched;
-    reg [15:0] data_latched;
-
     reg [15:0] tx_shift;
     reg [4:0]  tx_count;
+
+    wire [3:0] cmd_decoded;
+
+    assign cmd_decoded = rx_shift[23:20];
+    assign reg_addr    = rx_shift[19:16];
+    assign reg_wdata   = rx_shift[15:0];
+    assign reg_wr      = (state == S_EXEC) && (cmd_decoded == CMD_WRITE);
 
     always @(posedge cpu_clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -1483,32 +1486,23 @@ module debug_serial_frontend_tiny
             dbg_data_sync<= 2'b11;
             dbg_data_out <= 1'b1;
             dbg_data_oe  <= 1'b0;
-            reg_wr       <= 1'b0;
-            reg_addr     <= 4'h0;
-            reg_wdata    <= 16'h0000;
             rx_shift     <= 24'h000000;
             rx_count     <= 5'd0;
-            cmd_latched  <= 4'h0;
-            addr_latched <= 4'h0;
-            data_latched <= 16'h0000;
             tx_shift     <= 16'h0000;
             tx_count     <= 5'd0;
         end else begin
             dbg_clk_sync  <= {dbg_clk_sync[1:0], dbg_clk};
             dbg_data_sync <= {dbg_data_sync[0], dbg_data_in};
-            reg_wr <= 1'b0;
 
             case (state)
                 S_RX: begin
-                    dbg_data_oe <= 1'b0;
+                    dbg_data_oe  <= 1'b0;
                     dbg_data_out <= 1'b1;
                     if (dbg_clk_rise) begin
                         if (rx_count == 5'd23) begin
-                            cmd_latched  <= rx_shift[22:19];
-                            addr_latched <= rx_shift[18:15];
-                            data_latched <= {rx_shift[14:0], dbg_data_sync[1]};
-                            rx_count     <= 5'd0;
-                            state        <= S_EXEC;
+                            rx_shift <= {rx_shift[22:0], dbg_data_sync[1]};
+                            rx_count <= 5'd0;
+                            state    <= S_EXEC;
                         end else begin
                             rx_shift <= {rx_shift[22:0], dbg_data_sync[1]};
                             rx_count <= rx_count + 5'd1;
@@ -1517,27 +1511,23 @@ module debug_serial_frontend_tiny
                 end
 
                 S_EXEC: begin
-                    reg_addr  <= addr_latched;
-                    reg_wdata <= data_latched;
-                    if (cmd_latched == CMD_WRITE)
-                        reg_wr <= 1'b1;
                     state <= S_LOAD_TX;
                 end
 
                 S_LOAD_TX: begin
-                    if (cmd_latched == CMD_PING)
+                    if (cmd_decoded == CMD_PING)
                         tx_shift <= 16'hDB12;
-                    else if (cmd_latched == CMD_READ)
+                    else if (cmd_decoded == CMD_READ)
                         tx_shift <= reg_rdata;
-                    else if (cmd_latched == CMD_WRITE)
+                    else if (cmd_decoded == CMD_WRITE)
                         tx_shift <= 16'hACCE;
                     else
                         tx_shift <= 16'hEEEE;
 
-                    tx_count    <= 5'd0;
-                    dbg_data_oe <= 1'b0;
-                    dbg_data_out<= 1'b1;
-                    state       <= S_TURNAROUND;
+                    tx_count     <= 5'd0;
+                    dbg_data_oe  <= 1'b0;
+                    dbg_data_out <= 1'b1;
+                    state        <= S_TURNAROUND;
                 end
 
                 S_TURNAROUND: begin
@@ -1564,8 +1554,8 @@ module debug_serial_frontend_tiny
                 end
 
                 default: begin
-                    state <= S_RX;
-                    dbg_data_oe <= 1'b0;
+                    state        <= S_RX;
+                    dbg_data_oe  <= 1'b0;
                     dbg_data_out <= 1'b1;
                 end
             endcase
@@ -1607,30 +1597,27 @@ module cpu_cycle_controller_tiny
   localparam S_HALTED     = 3'd4;
 
   reg [2:0] state;
-  reg       halt_pending;
   reg       step_active;
 
   wire mem_op;
   wire stop_after_exec;
 
-  assign mem_op           = ld | st | flash_ld;
-  assign fetch_req        = (state == S_REQ_FETCH);
-  assign execute_now_pulse= (state == S_EXECUTE);
-  assign dbg_halted       = (state == S_HALTED);
-  assign stop_after_exec  = dbg_enable & (halt_pending | step_active | dbg_break_after_exec);
+  assign mem_op            = ld | st | flash_ld;
+  assign fetch_req         = (state == S_REQ_FETCH);
+  assign execute_now_pulse = (state == S_EXECUTE);
+  assign dbg_halted        = (state == S_HALTED);
+  assign stop_after_exec   = dbg_enable & (dbg_halt_req | step_active | dbg_break_after_exec);
 
   always @(posedge clk or negedge rst_n)
   begin
     if (!rst_n)
     begin
-      state        <= S_REQ_FETCH;
-      halt_pending <= 1'b0;
-      step_active  <= 1'b0;
+      state       <= S_REQ_FETCH;
+      step_active <= 1'b0;
     end
     else if (!dbg_enable)
     begin
-      halt_pending <= 1'b0;
-      step_active  <= 1'b0;
+      step_active <= 1'b0;
 
       case (state)
         S_REQ_FETCH:  state <= S_WAIT_FETCH;
@@ -1642,17 +1629,13 @@ module cpu_cycle_controller_tiny
     end
     else
     begin
-      if (dbg_halt_req)
-        halt_pending <= 1'b1;
-
       case (state)
         S_REQ_FETCH:
         begin
           if (dbg_halt_req)
           begin
-            state        <= S_HALTED;
-            halt_pending <= 1'b0;
-            step_active  <= 1'b0;
+            state       <= S_HALTED;
+            step_active <= 1'b0;
           end
           else
             state <= S_WAIT_FETCH;
@@ -1662,11 +1645,10 @@ module cpu_cycle_controller_tiny
         begin
           if (fetch_done)
           begin
-            if (dbg_break_hit | halt_pending)
+            if (dbg_break_hit | dbg_halt_req)
             begin
-              state        <= S_HALTED;
-              halt_pending <= 1'b0;
-              step_active  <= 1'b0;
+              state       <= S_HALTED;
+              step_active <= 1'b0;
             end
             else
               state <= S_EXECUTE;
@@ -1679,9 +1661,8 @@ module cpu_cycle_controller_tiny
             state <= S_WAIT_DATA;
           else if (stop_after_exec)
           begin
-            state        <= S_HALTED;
-            halt_pending <= 1'b0;
-            step_active  <= 1'b0;
+            state       <= S_HALTED;
+            step_active <= 1'b0;
           end
           else
             state <= S_REQ_FETCH;
@@ -1693,9 +1674,8 @@ module cpu_cycle_controller_tiny
           begin
             if (stop_after_exec)
             begin
-              state        <= S_HALTED;
-              halt_pending <= 1'b0;
-              step_active  <= 1'b0;
+              state       <= S_HALTED;
+              step_active <= 1'b0;
             end
             else
               state <= S_REQ_FETCH;
@@ -1704,8 +1684,6 @@ module cpu_cycle_controller_tiny
 
         S_HALTED:
         begin
-          halt_pending <= 1'b0;
-
           if (dbg_run_req)
           begin
             state       <= S_REQ_FETCH;
@@ -1720,9 +1698,8 @@ module cpu_cycle_controller_tiny
 
         default:
         begin
-          state        <= S_REQ_FETCH;
-          halt_pending <= 1'b0;
-          step_active  <= 1'b0;
+          state       <= S_REQ_FETCH;
+          step_active <= 1'b0;
         end
       endcase
     end
@@ -1910,15 +1887,14 @@ module debug_core_tiny
     input  wire [15:0] cpu_pc,
     input  wire [15:0] cpu_ir,
     input  wire        instr_is_brk,
-    input wire         execute_now_pulse,
+    input  wire        execute_now_pulse,
 
     // Debug control outputs
     output reg         dbg_enable,
     output reg         dbg_halt_req,
-    output reg         dbg_run_req,
-    output reg         dbg_step_req,
+    output wire        dbg_run_req,
+    output wire        dbg_step_req,
     output reg         static_break_enable,
-
 
     output wire        dbg_break_hit,
     output wire        dbg_break_after_exec
@@ -1932,36 +1908,39 @@ module debug_core_tiny
   localparam REG_IR      = 4'h5;
   localparam REG_BP0     = 4'h8;
   localparam REG_BPCTRL  = 4'h9;
-  // One dynamic breakpoint only
+
   reg  [15:0] bp0;
   reg         bp_enable;
-  reg bp_resume_mask;
+  reg         bp_resume_mask;
+
+  wire ctrl_wr;
+  wire run_pulse;
+  wire step_pulse;
   wire resume_cmd;
   wire bp_raw_hit;
 
-  assign resume_cmd = dbg_run_req | dbg_step_req;
-  assign bp_raw_hit = dbg_enable & bp_enable & (cpu_pc == bp0);
-
-  assign dbg_break_hit = bp_raw_hit & ~bp_resume_mask;
+  assign ctrl_wr              = reg_wr & (reg_addr == REG_CONTROL);
+  assign run_pulse            = ctrl_wr & reg_wdata[0] & reg_wdata[2];
+  assign step_pulse           = ctrl_wr & reg_wdata[0] & reg_wdata[3];
+  assign dbg_run_req          = run_pulse;
+  assign dbg_step_req         = step_pulse;
+  assign resume_cmd           = run_pulse | step_pulse;
+  assign bp_raw_hit           = dbg_enable & bp_enable & (cpu_pc == bp0);
+  assign dbg_break_hit        = bp_raw_hit & ~bp_resume_mask;
   assign dbg_break_after_exec = dbg_enable & static_break_enable & instr_is_brk;
 
   always @(posedge clk or negedge rst_n)
   begin
     if (!rst_n)
     begin
-      dbg_enable           <= 1'b0;
-      dbg_halt_req         <= 1'b0;
-      dbg_run_req          <= 1'b0;
-      dbg_step_req         <= 1'b0;
-      static_break_enable  <= 1'b0;
-      bp0                  <= 16'h0000;
-      bp_enable            <= 1'b0;
+      dbg_enable          <= 1'b0;
+      dbg_halt_req        <= 1'b0;
+      static_break_enable <= 1'b0;
+      bp0                 <= 16'h0000;
+      bp_enable           <= 1'b0;
     end
     else
     begin
-      dbg_run_req  <= 1'b0;
-      dbg_step_req <= 1'b0;
-
       if (cpu_dbg_halted)
         dbg_halt_req <= 1'b0;
 
@@ -1973,23 +1952,10 @@ module debug_core_tiny
             dbg_enable          <= reg_wdata[0];
             static_break_enable <= reg_wdata[5];
 
-            if (!reg_wdata[0])
+            if (!reg_wdata[0] || reg_wdata[2] || reg_wdata[3])
               dbg_halt_req <= 1'b0;
-
-            if (reg_wdata[1] && reg_wdata[0])
+            else if (reg_wdata[1])
               dbg_halt_req <= 1'b1;
-
-            if (reg_wdata[2] && reg_wdata[0])
-            begin
-              dbg_run_req  <= 1'b1;
-              dbg_halt_req <= 1'b0;
-            end
-
-            if (reg_wdata[3] && reg_wdata[0])
-            begin
-              dbg_step_req <= 1'b1;
-              dbg_halt_req <= 1'b0;
-            end
           end
 
           REG_BP0:
@@ -2515,11 +2481,11 @@ module tt_um_remedy_cpu (
   wire s39;
   wire s40;
   wire [7:0] s41;
-  wire [7:0] uo_out_temp;
   wire s42;
   wire sf;
   wire s43;
   wire s44;
+  wire [7:0] uo_out_temp;
   wire pc_en;
   wire s45;
   wire s46;
@@ -2547,69 +2513,69 @@ module tt_um_remedy_cpu (
   wire s52;
   wire Fetch_done;
   wire abs;
-  wire s53;
-  wire s54;
-  wire s55;
-  wire s56;
-  wire \sda-in ;
-  wire \scl-in ;
-  wire dbg_data_in;
-  wire spics_ram;
-  wire spics_flash;
-  wire sda_o;
-  wire scl_o;
-  wire dbg_data_out;
-  wire sda_oe;
-  wire scl_oe;
-  wire dbg_data_oe;
-  wire [3:0] s57;
-  wire [2:0] s58;
+  wire [3:0] s53;
+  wire [2:0] s54;
   wire [15:0] intr_reg;
   wire InterLock;
-  wire s59;
-  wire s60;
+  wire s55;
+  wire s56;
   wire i2c_inter;
-  wire [7:0] s61;
+  wire [7:0] s57;
   wire [15:0] rngdat0;
   wire [15:0] timerdat1;
-  wire [8:0] s62;
+  wire [8:0] s58;
   wire [15:0] timerdat2;
-  wire [2:0] s63;
+  wire [2:0] s59;
   wire [15:0] i2cDat;
-  wire [4:0] s64;
-  wire s65;
-  wire [3:0] s66;
+  wire [4:0] s60;
+  wire s61;
+  wire [3:0] s62;
+  wire \sda-in ;
+  wire \scl-in ;
+  wire sda_o;
+  wire scl_o;
+  wire sda_oe;
+  wire scl_oe;
   wire st;
   wire flash_req;
   wire Break;
   wire spi_target;
+  wire spics_ram;
+  wire s63;
+  wire spics_flash;
+  wire s64;
+  wire s65;
+  wire s66;
   wire s67;
   wire s68;
   wire s69;
   wire s70;
-  wire s71;
-  wire s72;
-  wire s73;
-  wire s74;
   wire [2:0] flag_out;
   wire dbg_clk;
+  wire dbg_data_in;
   wire [15:0] reg_rdata;
+  wire dbg_data_out;
+  wire dbg_data_oe;
+  wire s71;
+  wire [3:0] s72;
+  wire [15:0] s73;
+  wire s74;
   wire s75;
-  wire [3:0] s76;
-  wire [15:0] s77;
-  wire s78;
-  wire s79;
-  wire s80;
-  wire s81;
+  wire s76;
+  wire s77;
   wire dbg_en;
   wire halt_req;
   wire run_req;
   wire step_req;
-  wire s82;
-  wire s83;
+  wire s78;
+  wire s79;
   wire fetch_request_pulse;
   wire dbg_halted;
   wire ststic_break_en;
+  wire s80;
+  wire s81;
+  wire s82;
+  wire s83;
   Mux_2x1 Mux_2x1_i0 (
     .sel( ena ),
     .in_0( 1'b1 ),
@@ -2617,10 +2583,10 @@ module tt_um_remedy_cpu (
     .out( s19 )
   );
   assign spi_miso = uio_in[0];
-  assign s53 = uio_in[1];
-  assign s54 = uio_in[2];
-  assign s55 = uio_in[3];
-  assign s56 = uio_in[4];
+  assign s80 = uio_in[1];
+  assign s81 = uio_in[2];
+  assign s82 = uio_in[3];
+  assign s83 = uio_in[4];
   assign \sda-in  = uio_in[5];
   assign \scl-in  = uio_in[6];
   assign dbg_data_in = uio_in[7];
@@ -2713,12 +2679,12 @@ module tt_um_remedy_cpu (
   );
   // interrupt_controller_small
   interrupt_controller_small interrupt_controller_small_i9 (
-    .dOut( s57 ),
+    .dOut( s53 ),
     .Addr( s10 ),
     .ioW( s39 ),
     .C( s19 ),
     .rst_n( rst_n ),
-    .irq_in( s58 ),
+    .irq_in( s54 ),
     .imm( imm ),
     .reti( Reti ),
     .pc_en( pc_en ),
@@ -2732,7 +2698,7 @@ module tt_um_remedy_cpu (
   // lfsr_RandomNumberGen
   lfsr_RandomNumberGen lfsr_RandomNumberGen_i10 (
     .adrrIn( s10 ),
-    .dataIn( s61 ),
+    .dataIn( s57 ),
     .ioW( s39 ),
     .clk( s19 ),
     .SeedAdr( 16'b1011 ),
@@ -2753,11 +2719,11 @@ module tt_um_remedy_cpu (
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat1 ),
-    .timer_interrupt( s59 )
+    .timer_interrupt( s55 )
   );
   // timer_tiny
   timer_tiny timer_tiny_i12 (
-    .dOut( s62 ),
+    .dOut( s58 ),
     .Addr( s10 ),
     .ioW( s39 ),
     .C( s19 ),
@@ -2769,7 +2735,7 @@ module tt_um_remedy_cpu (
     .timerSyncStartAddr( 16'b1010 ),
     .rst_n( rst_n ),
     .TimerOut( timerdat2 ),
-    .timer_interrupt( s60 )
+    .timer_interrupt( s56 )
   );
   // RegisterBlock
   RegisterBlock RegisterBlock_i13 (
@@ -2785,7 +2751,7 @@ module tt_um_remedy_cpu (
     .Bits(16)
   )
   Mux_8x1_NBits_i14 (
-    .sel( s63 ),
+    .sel( s59 ),
     .in_0( inputReg ),
     .in_1( outR ),
     .in_2( timerdat1 ),
@@ -2800,8 +2766,8 @@ module tt_um_remedy_cpu (
   i2c_master_ctrl i2c_master_ctrl_i15 (
     .clk( s19 ),
     .rst_n( rst_n ),
-    .wr_en( s65 ),
-    .reg_addr( s66 ),
+    .wr_en( s61 ),
+    .reg_addr( s62 ),
     .cpu_din( s1 ),
     .sda_in( \sda-in  ),
     .scl_in( \scl-in  ),
@@ -2821,9 +2787,9 @@ module tt_um_remedy_cpu (
     .reg_rdata( reg_rdata ),
     .dbg_data_out( dbg_data_out ),
     .dbg_data_oe( dbg_data_oe ),
-    .reg_wr( s75 ),
-    .reg_addr( s76 ),
-    .reg_wdata( s77 )
+    .reg_wr( s71 ),
+    .reg_addr( s72 ),
+    .reg_wdata( s73 )
   );
   // cpu_cycle_controller_tiny
   cpu_cycle_controller_tiny cpu_cycle_controller_tiny_i17 (
@@ -2838,8 +2804,8 @@ module tt_um_remedy_cpu (
     .dbg_halt_req( halt_req ),
     .dbg_run_req( run_req ),
     .dbg_step_req( step_req ),
-    .dbg_break_hit( s82 ),
-    .dbg_break_after_exec( s83 ),
+    .dbg_break_hit( s78 ),
+    .dbg_break_after_exec( s79 ),
     .fetch_req( fetch_request_pulse ),
     .execute_now_pulse( \execute-pulse  ),
     .dbg_halted( dbg_halted )
@@ -2849,9 +2815,9 @@ module tt_um_remedy_cpu (
     .clk( s19 ),
     .rst_n( rst_n ),
     .fetch_req( fetch_request_pulse ),
-    .ld_req( s78 ),
-    .st_req( s79 ),
-    .flash_req( s81 ),
+    .ld_req( s74 ),
+    .st_req( s75 ),
+    .flash_req( s77 ),
     .fetch_addr( programAddr ),
     .data_addr( s10 ),
     .store_data( s1 ),
@@ -2860,7 +2826,7 @@ module tt_um_remedy_cpu (
     .mem_rdata( mem_out ),
     .fetch_done( Fetch_done ),
     .data_done( data_done ),
-    .mem_stall( s80 ),
+    .mem_stall( s76 ),
     .spi_st( spi_st ),
     .spi_ld( spi_ld ),
     .spi_addr( spi_addr ),
@@ -2871,9 +2837,9 @@ module tt_um_remedy_cpu (
   debug_core_tiny debug_core_tiny_i19 (
     .clk( s19 ),
     .rst_n( rst_n ),
-    .reg_wr( s75 ),
-    .reg_addr( s76 ),
-    .reg_wdata( s77 ),
+    .reg_wr( s71 ),
+    .reg_addr( s72 ),
+    .reg_wdata( s73 ),
     .cpu_dbg_halted( dbg_halted ),
     .cpu_flags( flag_out ),
     .cpu_pc( programAddr ),
@@ -2886,34 +2852,26 @@ module tt_um_remedy_cpu (
     .dbg_run_req( run_req ),
     .dbg_step_req( step_req ),
     .static_break_enable( ststic_break_en ),
-    .dbg_break_hit( s82 ),
-    .dbg_break_after_exec( s83 )
+    .dbg_break_hit( s78 ),
+    .dbg_break_after_exec( s79 )
   );
   assign s36 = (intr & \execute-pulse );
   assign outR[7:0] = uo_out_temp;
   assign outR[15:8] = 8'b0;
-  assign uio_oe[0] = 1'b0;
-  assign uio_oe[1] = 1'b1;
-  assign uio_oe[2] = 1'b1;
-  assign uio_oe[3] = 1'b1;
-  assign uio_oe[4] = 1'b1;
-  assign uio_oe[5] = sda_oe;
-  assign uio_oe[6] = scl_oe;
-  assign uio_oe[7] = dbg_data_oe;
-  assign s58[0] = s59;
-  assign s58[1] = s60;
-  assign s58[2] = i2c_inter;
+  assign s54[0] = s55;
+  assign s54[1] = s56;
+  assign s54[2] = i2c_inter;
   Mux_2x1 Mux_2x1_i20 (
     .sel( spi_target ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
     .out( spics_ram )
   );
-  assign s67 = ~ spi_target;
+  assign s63 = ~ spi_target;
   assign flag_out[0] = s16;
   assign flag_out[1] = s15;
   assign flag_out[2] = s14;
-  assign pc_en = (~ s80 & \execute-pulse );
+  assign pc_en = (~ s76 & \execute-pulse );
   DIG_Add #(
     .Bits(16)
   )
@@ -2923,14 +2881,22 @@ module tt_um_remedy_cpu (
     .c_i( 1'b0 ),
     .s( s11 )
   );
+  assign uio_oe[0] = 1'b0;
+  assign uio_oe[1] = 1'b1;
+  assign uio_oe[2] = 1'b1;
+  assign uio_oe[3] = 1'b1;
+  assign uio_oe[4] = 1'b1;
+  assign uio_oe[5] = sda_oe;
+  assign uio_oe[6] = scl_oe;
+  assign uio_oe[7] = dbg_data_oe;
   assign s7 = inst_reg[3:0];
   assign s8 = inst_reg[7:4];
   assign OPcode = inst_reg[15:8];
   assign s41 = s1[7:0];
   assign s18 = inst_reg[7:0];
-  assign s62 = s1[8:0];
-  assign s61 = s1[7:0];
-  assign s57 = s1[3:0];
+  assign s58 = s1[8:0];
+  assign s57 = s1[7:0];
+  assign s53 = s1[3:0];
   singExtend singExtend_i22 (
     .inst( s18 ),
     .\4S ( s3 ),
@@ -2938,7 +2904,7 @@ module tt_um_remedy_cpu (
     .\4D ( s5 )
   );
   Mux_2x1 Mux_2x1_i23 (
-    .sel( s67 ),
+    .sel( s63 ),
     .in_0( 1'b1 ),
     .in_1( spi_cs ),
     .out( spics_flash )
@@ -3022,9 +2988,9 @@ module tt_um_remedy_cpu (
   assign s48 = (s52 & \execute-pulse );
   assign s45 = (abs & \execute-pulse );
   assign s47 = (flash_req | ld);
-  assign s78 = (ld & \execute-pulse );
-  assign s79 = (\execute-pulse  & st);
-  assign s81 = (\execute-pulse  & flash_req);
+  assign s74 = (ld & \execute-pulse );
+  assign s75 = (\execute-pulse  & st);
+  assign s77 = (\execute-pulse  & flash_req);
   Mux_8x1_NBits #(
     .Bits(16)
   )
@@ -3088,19 +3054,19 @@ module tt_um_remedy_cpu (
     .\= ( s38 )
   );
   assign s46 = ((s17 ^ br[2]) & \execute-pulse );
-  assign s65 = (s10[4] & s39);
-  assign s64 = s10[4:0];
-  assign s66 = s10[3:0];
+  assign s61 = (s10[4] & s39);
+  assign s60 = s10[4:0];
+  assign s62 = s10[3:0];
   assign s40 = (s38 & s39);
-  assign s68 = s64[0];
-  assign s69 = s64[1];
-  assign s70 = s64[2];
-  assign s71 = s64[3];
-  assign s72 = s64[4];
-  assign s73 = ~ s70;
-  assign s74 = ~ s69;
-  assign s63[0] = ((~ s72 & s73 & s74 & s68) | (s71 & s74 & s68) | (s71 & s73 & s74) | (s70 & s69));
-  assign s63[1] = (s72 | (~ s71 & s69) | (~ s71 & s70) | (s71 & s73 & s74));
-  assign s63[2] = (s72 | (s71 & s69 & s68) | (s71 & s70));
+  assign s64 = s60[0];
+  assign s65 = s60[1];
+  assign s66 = s60[2];
+  assign s67 = s60[3];
+  assign s68 = s60[4];
+  assign s69 = ~ s66;
+  assign s70 = ~ s65;
+  assign s59[0] = ((~ s68 & s69 & s70 & s64) | (s67 & s70 & s64) | (s67 & s69 & s70) | (s66 & s65));
+  assign s59[1] = (s68 | (~ s67 & s65) | (~ s67 & s66) | (s67 & s69 & s70));
+  assign s59[2] = (s68 | (s67 & s65 & s64) | (s67 & s66));
   assign uo_out = uo_out_temp;
 endmodule
